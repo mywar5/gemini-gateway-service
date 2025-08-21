@@ -51,7 +51,7 @@ describe("GeminiAccountPool - Google API Interaction", () => {
 		jest.useRealTimers()
 		// Destroy the pool's agent after each test to prevent open handles
 		if (pool) {
-			await pool.destroy()
+			pool.destroy()
 		}
 	})
 	const createMockAccount = (filePath: string, projectId?: string, tokenExpired = false): Account => ({
@@ -88,7 +88,6 @@ describe("GeminiAccountPool - Google API Interaction", () => {
 
 		const methodName = "testMethod"
 		const requestBody = { data: "test" }
-		const expectedUrl = `https://cloudcode-pa.googleapis.com/v1internal:${methodName}`
 
 		mockRequest.mockResolvedValue({ data: { success: true } })
 
@@ -99,10 +98,11 @@ describe("GeminiAccountPool - Google API Interaction", () => {
 		expect(mockRequest).toHaveBeenCalledTimes(1)
 		expect(mockRequest).toHaveBeenCalledWith(
 			expect.objectContaining({
-				url: expectedUrl,
+				baseURL: "https://cloudcode-pa.googleapis.com",
+				url: "/v1internal:testMethod",
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				data: JSON.stringify(requestBody),
+				data: JSON.stringify({ data: "test" }),
 			}),
 		)
 	})

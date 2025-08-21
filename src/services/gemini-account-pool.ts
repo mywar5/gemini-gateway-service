@@ -406,7 +406,8 @@ export class GeminiAccountPool {
 	): Promise<any> {
 		try {
 			const res = await account.authClient.request({
-				url: `https://cloudcode-pa.googleapis.com/v1internal:${method}`,
+				baseURL: "https://cloudcode-pa.googleapis.com",
+				url: `/v1internal:${method}`,
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
