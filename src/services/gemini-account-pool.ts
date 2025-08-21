@@ -59,8 +59,15 @@ export class GeminiAccountPool {
 		}
 
 		if (this.proxy) {
-			chatAgentOptions.proxy = this.proxy
-			discoveryAgentOptions.proxy = this.proxy
+			const proxyUrl = new URL(this.proxy)
+			const proxyOptions = {
+				hostname: proxyUrl.hostname,
+				port: parseInt(proxyUrl.port, 10),
+				protocol: proxyUrl.protocol,
+				auth: proxyUrl.username ? `${proxyUrl.username}:${proxyUrl.password}` : undefined,
+			}
+			chatAgentOptions.proxy = proxyOptions
+			discoveryAgentOptions.proxy = proxyOptions
 		}
 
 		this.httpAgent = new HttpsProxyAgent(chatAgentOptions)
@@ -103,7 +110,15 @@ export class GeminiAccountPool {
 					console.error(`[GeminiPool] Incomplete credential file, skipping: ${filePath}`)
 					return null
 				}
-				const authClient = new OAuth2Client(OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REDIRECT_URI)
+				const authClient = new OAuth2Client({
+					clientId: OAUTH_CLIENT_ID,
+					clientSecret: OAUTH_CLIENT_SECRET,
+					redirectUri: OAUTH_REDIRECT_URI,
+				})
+				// Manually set the agent for the auth client
+				;(authClient as any).requestOptions = {
+					agent: this.discoveryAgent,
+				}
 				authClient.setCredentials({
 					access_token: credentials.access_token,
 					refresh_token: credentials.refresh_token,

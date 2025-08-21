@@ -73,10 +73,16 @@ describe("GeminiAccountPool Integration Tests", () => {
 	test("should initialize with http2 agent and proxy if proxy is provided", async () => {
 		const proxy = "http://localhost:8888"
 		new GeminiAccountPool(credentialsPath, proxy)
+		const expectedProxyObject = {
+			hostname: "localhost",
+			port: 8888,
+			protocol: "http:",
+			auth: undefined,
+		}
 		expect(mockedHpagent).toHaveBeenCalledWith(
 			expect.objectContaining({
 				http2: { enable: true },
-				proxy: proxy,
+				proxy: expect.objectContaining(expectedProxyObject),
 			}),
 		)
 	})
