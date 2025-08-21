@@ -81,26 +81,31 @@ export class GeminiAccountPool {
 			throw new Error("No valid credential files found.")
 		}
 
-		this.credentials = accountConfigs.map(({ filePath, parsedData }) => {
-			const credentials = (parsedData.credentials || parsedData) as OAuthCredentials
-			const projectId = parsedData.projectId || null
-			const authClient = new OAuth2Client(OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REDIRECT_URI)
-			authClient.setCredentials({
-				access_token: credentials.access_token,
-				refresh_token: credentials.refresh_token,
-				expiry_date: credentials.expiry_date,
+		this.credentials = accountConfigs
+			.map(({ filePath, parsedData }) => {
+				const { projectId, credentials } = parsedData
+				if (!credentials) {
+					console.error(`[GeminiPool] Incomplete credential file, skipping: ${filePath}`)
+					return null
+				}
+				const authClient = new OAuth2Client(OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REDIRECT_URI)
+				authClient.setCredentials({
+					access_token: credentials.access_token,
+					refresh_token: credentials.refresh_token,
+					expiry_date: credentials.expiry_date,
+				})
+				return {
+					credentials,
+					projectId,
+					authClient,
+					filePath,
+					successes: 1,
+					failures: 1,
+					frozenUntil: 0,
+					isInitialized: false,
+				}
 			})
-			return {
-				credentials,
-				projectId,
-				authClient,
-				filePath,
-				successes: 1,
-				failures: 1,
-				frozenUntil: 0,
-				isInitialized: false,
-			}
-		})
+			.filter((acc): acc is Account => acc !== null)
 
 		console.log(`[GeminiPool] Starting parallel warm-up for ${this.credentials.length} credentials...`)
 		const warmUpPromises = this.credentials.map((acc) => this.warmUpAccount(acc))
@@ -121,8 +126,15 @@ export class GeminiAccountPool {
 				`[GeminiPool] Successfully warmed up account ${account.filePath} with project ${account.projectId}`,
 			)
 		} catch (error: any) {
-			console.error(`[GeminiPool] Failed to warm up account ${account.filePath}:`, error.message)
-			throw error
+			console.error(`[GeminiPool] Failed to warm up account ${account.filePath}, freezing. Error:`, error.message)
+			// Freeze the account immediately upon warm-up failure
+			account.failures++
+			const jitter = Math.random() * 1000
+			const cooldownDuration = GENERAL_FAILURE_QUARANTINE_MS + jitter
+			account.frozenUntil = Date.now() + cooldownDuration
+			console.warn(
+				`[GeminiPool] Account ${account.filePath} frozen for ${cooldownDuration / 1000}s due to warm-up failure.`,
+			)
 		}
 	}
 
@@ -275,18 +287,10 @@ export class GeminiAccountPool {
 
 	private async saveAccountCredentials(account: Account): Promise<void> {
 		try {
-			const fileContent = await fs.readFile(account.filePath, "utf-8")
-			const originalData = JSON.parse(fileContent)
-			let dataToSave: any
-
-			if (originalData.credentials) {
-				dataToSave = { ...originalData, credentials: account.credentials, projectId: account.projectId }
-			} else {
-				dataToSave = { ...account.credentials }
-				if (originalData.projectId) dataToSave.projectId = originalData.projectId
+			const dataToSave = {
+				projectId: account.projectId,
+				credentials: account.credentials,
 			}
-			if (dataToSave.projectId === null) delete dataToSave.projectId
-
 			await fs.writeFile(account.filePath, JSON.stringify(dataToSave, null, 2))
 		} catch (error) {
 			console.error(`[GeminiPool] Failed to save credentials for ${account.filePath}`, error)
@@ -294,11 +298,97 @@ export class GeminiAccountPool {
 	}
 
 	private async discoverProjectId(account: Account): Promise<string> {
-		// This logic is highly specific and might need adjustment.
-		// For now, we assume a simplified version.
-		// A real implementation would need the full LRO polling logic.
-		console.log(`[GeminiPool] Project ID discovery for ${account.filePath} is a placeholder.`)
-		return "mock-project-id"
+		if (account.projectId) {
+			return account.projectId
+		}
+
+		const initialProjectId = "default"
+		const clientMetadata = {
+			ideType: "IDE_UNSPECIFIED",
+			platform: "PLATFORM_UNSPECIFIED",
+			pluginType: "GEMINI",
+			duetProject: initialProjectId,
+		}
+
+		try {
+			const loadRequest = {
+				cloudaicompanionProject: initialProjectId,
+				metadata: clientMetadata,
+			}
+			const loadResponse = await this.callEndpoint(account, "loadCodeAssist", loadRequest)
+
+			if (loadResponse.cloudaicompanionProject) {
+				const discoveredId = loadResponse.cloudaicompanionProject
+				account.projectId = discoveredId
+				await this.saveAccountCredentials(account)
+				return discoveredId
+			}
+
+			const defaultTier = loadResponse.allowedTiers?.find((tier: any) => tier.isDefault)
+			const tierId = defaultTier?.id || "free-tier"
+			const onboardRequest = {
+				tierId: tierId,
+				cloudaicompanionProject: initialProjectId,
+				metadata: clientMetadata,
+			}
+			let lroResponse = await this.callEndpoint(account, "onboardUser", onboardRequest)
+
+			const MAX_RETRIES = 10
+			let retryCount = 0
+			let backoff = 1000
+			const MAX_BACKOFF = 16000
+
+			while (!lroResponse.done && retryCount < MAX_RETRIES) {
+				const jitter = Math.random() * 500
+				await new Promise((resolve) => setTimeout(resolve, backoff + jitter))
+				lroResponse = await this.callEndpoint(account, "onboardUser", onboardRequest)
+				backoff = Math.min(MAX_BACKOFF, backoff * 2)
+				retryCount++
+			}
+
+			if (!lroResponse.done) {
+				throw new Error("Onboarding timed out.")
+			}
+
+			const discoveredProjectId = lroResponse.response?.cloudaicompanionProject?.id || initialProjectId
+			account.projectId = discoveredProjectId
+			await this.saveAccountCredentials(account)
+			return discoveredProjectId
+		} catch (error: any) {
+			console.error("Failed to discover project ID:", error.response?.data || error.message)
+			throw new Error("Project discovery failed.")
+		}
+	}
+
+	private async callEndpoint(
+		account: Account,
+		method: string,
+		body: any,
+		retryAuth: boolean = true,
+		signal?: AbortSignal,
+	): Promise<any> {
+		try {
+			const res = await account.authClient.request({
+				url: `https://cloudcode-pa.googleapis.com/v1internal:${method}`,
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+				responseType: "json",
+				data: JSON.stringify(body),
+				signal: signal,
+				agent: this.httpAgent as any,
+			})
+			return res.data
+		} catch (error: any) {
+			console.error(`[GeminiPool] Error calling ${method} for account ${account.filePath}:`, error.message)
+			if (error.response?.status === 401 && retryAuth) {
+				console.log(`[GeminiPool] Received 401, attempting token refresh for ${account.filePath}`)
+				await this.ensureAuthenticated(account)
+				return this.callEndpoint(account, method, body, false)
+			}
+			throw error
+		}
 	}
 
 	public destroy(): void {

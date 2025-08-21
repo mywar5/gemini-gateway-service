@@ -75,7 +75,61 @@ describe("GeminiAccountPool", () => {
 		expect(credentials.length).toBe(2)
 		expect(mockFs.readdir).toHaveBeenCalledWith(mockAccountsPath)
 	})
+	describe("discoverProjectId during warm-up", () => {
+		beforeEach(() => {
+			// Mock a file without a projectId
+			mockFs.readFile.mockImplementation((filePath: any) => {
+				const fileName = path.basename(filePath)
+				if (fileName === "acc1.json") {
+					return Promise.resolve(
+						JSON.stringify({
+							credentials: {
+								access_token: "token1",
+								refresh_token: "refresh1",
+								expiry_date: Date.now() + 3600000,
+							},
+							// No projectId
+						}),
+					)
+				}
+				return Promise.reject(new Error("File not found"))
+			})
+			mockFs.readdir.mockResolvedValue(["acc1.json"] as any)
+		})
 
+		it("should call discoverProjectId if projectId is missing and save it", async () => {
+			const discoveredProjectId = "discovered-project-123"
+			// Spy on the internal callEndpoint method instead of the whole discoverProjectId
+			const callEndpointSpy = jest
+				.spyOn(GeminiAccountPool.prototype as any, "callEndpoint")
+				// Mock the two-step discovery process
+				.mockResolvedValueOnce({ cloudaicompanionProject: discoveredProjectId }) // 1. loadCodeAssist
+
+			const saveSpy = jest
+				.spyOn(GeminiAccountPool.prototype as any, "saveAccountCredentials")
+				.mockResolvedValue(undefined)
+
+			pool = new GeminiAccountPool(mockAccountsPath)
+			await (pool as any).initializationPromise
+
+			const account = (pool as any).credentials[0] as Account
+			expect(callEndpointSpy).toHaveBeenCalled()
+			expect(account.projectId).toBe(discoveredProjectId)
+			expect(saveSpy).toHaveBeenCalledWith(expect.objectContaining({ projectId: discoveredProjectId }))
+		})
+
+		it("should handle warm-up failure gracefully", async () => {
+			pool = new GeminiAccountPool(mockAccountsPath)
+			const discoveryError = new Error("Discovery failed")
+			jest.spyOn(pool as any, "discoverProjectId").mockRejectedValue(discoveryError)
+
+			await (pool as any).initializationPromise
+
+			const account = (pool as any).credentials[0] as Account
+			expect(account.isInitialized).toBe(false)
+			expect(account.frozenUntil).toBeGreaterThan(Date.now())
+		})
+	})
 	it("should select an account", async () => {
 		pool = new GeminiAccountPool(mockAccountsPath)
 		// @ts-ignore

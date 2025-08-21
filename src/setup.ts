@@ -3,18 +3,10 @@ import * as fs from "fs/promises"
 import * as path from "path"
 import * as http from "http"
 import inquirer from "inquirer"
+import open from "open"
 
 // --- Static Configuration ---
-// --- Static Configuration ---
-const OAUTH_CLIENT_ID = process.env.OAUTH_CLIENT_ID
-const OAUTH_CLIENT_SECRET = process.env.OAUTH_CLIENT_SECRET
 const OAUTH_REDIRECT_URI = "http://localhost:45289"
-
-if (!OAUTH_CLIENT_ID || !OAUTH_CLIENT_SECRET) {
-	console.error("Error: Missing required environment variables for setup: OAUTH_CLIENT_ID and OAUTH_CLIENT_SECRET")
-	console.error("Please set them in your environment or in a .env file before running the setup script.")
-	process.exit(1)
-}
 
 // --- Type Definitions ---
 interface OAuthCredentials {
@@ -50,23 +42,37 @@ export class AuthManager {
 
 	private async addNewAccount(): Promise<void> {
 		try {
-			const { projectId } = await inquirer.prompt([
+			const { projectId, clientId, clientSecret } = await inquirer.prompt([
 				{
 					type: "input",
 					name: "projectId",
 					message: "Enter the Google Cloud Project ID for this account:",
 					validate: (input) => !!input || "Project ID cannot be empty.",
 				},
+				{
+					type: "password",
+					name: "clientId",
+					message: "Enter the OAuth Client ID:",
+					validate: (input) => !!input || "Client ID cannot be empty.",
+				},
+				{
+					type: "password",
+					name: "clientSecret",
+					message: "Enter the OAuth Client Secret:",
+					validate: (input) => !!input || "Client Secret cannot be empty.",
+				},
 			])
-
-			const credentials = await this.runAuthProcess()
+			const credentials = await this.runAuthProcess(clientId, clientSecret)
 			if (credentials) {
+				// Construct the final configuration to match the required format
 				const finalConfig = { projectId, credentials }
+				const filePath = path.join(this.credentialsPath, `${projectId}.json`)
+
+				// Ensure the directory exists
 				await fs.mkdir(this.credentialsPath, { recursive: true })
-				await fs.writeFile(
-					path.join(this.credentialsPath, `${projectId}.json`),
-					JSON.stringify(finalConfig, null, 2),
-				)
+
+				// Write the formatted data to the file
+				await fs.writeFile(filePath, JSON.stringify(finalConfig, null, 2))
 				console.log(`\nSuccessfully added and saved credentials for project ${projectId}.`)
 			}
 		} catch (error) {
@@ -74,9 +80,9 @@ export class AuthManager {
 		}
 	}
 
-	private runAuthProcess(): Promise<OAuthCredentials | null> {
+	private runAuthProcess(clientId: string, clientSecret: string): Promise<OAuthCredentials | null> {
 		return new Promise((resolve, reject) => {
-			const oAuth2Client = new OAuth2Client(OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REDIRECT_URI)
+			const oAuth2Client = new OAuth2Client(clientId, clientSecret, OAUTH_REDIRECT_URI)
 
 			const authUrl = oAuth2Client.generateAuthUrl({
 				access_type: "offline",
@@ -86,6 +92,7 @@ export class AuthManager {
 
 			console.log("\nPlease open the following URL in your browser to authorize the application:")
 			console.log(authUrl)
+			open(authUrl)
 
 			const server = http.createServer(async (req, res) => {
 				try {
