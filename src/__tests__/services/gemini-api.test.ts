@@ -88,6 +88,7 @@ describe("GeminiAccountPool - Google API Interaction", () => {
 
 		const methodName = "testMethod"
 		const requestBody = { data: "test" }
+		const expectedUrl = `https://cloudcode-pa.googleapis.com/v1internal:${methodName}`
 
 		mockRequest.mockResolvedValue({ data: { success: true } })
 
@@ -98,8 +99,7 @@ describe("GeminiAccountPool - Google API Interaction", () => {
 		expect(mockRequest).toHaveBeenCalledTimes(1)
 		expect(mockRequest).toHaveBeenCalledWith(
 			expect.objectContaining({
-				baseURL: "https://cloudcode-pa.googleapis.com",
-				url: "/v1internal:testMethod",
+				url: expectedUrl,
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
 				data: JSON.stringify({ data: "test" }),
