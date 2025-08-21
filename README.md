@@ -69,7 +69,7 @@
 1.  **克隆仓库并安装依赖**:
 
     ```bash
-    git clone https://github.com/your-repo/gemini-gateway-service.git
+    git clone https://github.com/mywar5/gemini-gateway-service.git
     cd gemini-gateway-service
     npm install
     ```
