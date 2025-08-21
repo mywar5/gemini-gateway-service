@@ -1,0 +1,15 @@
+version: "3.8"
+
+services:
+    gemini-gateway:
+        build:
+            context: .
+            dockerfile: Dockerfile
+        container_name: gemini-gateway-service
+        restart: unless-stopped
+        ports:
+            - "${PORT:-3000}:3000"
+        volumes:
+            - ./accounts:/app/accounts
+        env_file:
+            - .env
