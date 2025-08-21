@@ -1,6 +1,7 @@
 import fastify, { FastifyInstance } from "fastify"
 import { GeminiAccountPool } from "./services/gemini-account-pool"
 import { registerChatRoutes } from "./routes/chat"
+import { registerManagementRoutes } from "./routes/management"
 import * as fs from "fs/promises"
 import * as path from "path"
 
@@ -29,6 +30,7 @@ export function buildServer(): FastifyInstance {
 
 	// Register routes
 	registerChatRoutes(server)
+	registerManagementRoutes(server)
 
 	return server
 }

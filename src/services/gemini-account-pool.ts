@@ -291,6 +291,18 @@ export class GeminiAccountPool {
 		throw new Error("[GeminiPool] All credentials failed or are frozen.")
 	}
 
+	public unfreezeAccount(accountIdentifier: string): boolean {
+		const account = this.credentials.find((acc) => acc.filePath.endsWith(accountIdentifier))
+
+		if (account) {
+			account.frozenUntil = 0
+			console.log(`[GeminiPool] Account ${account.filePath} has been manually unfrozen.`)
+			return true
+		}
+
+		return false
+	}
+
 	private async ensureAuthenticated(account: Account): Promise<void> {
 		if (account.credentials && account.credentials.expiry_date < Date.now()) {
 			console.log(`[GeminiPool] Token expired for ${account.filePath}, refreshing...`)
