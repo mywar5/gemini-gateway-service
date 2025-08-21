@@ -440,13 +440,14 @@ export class GeminiAccountPool {
 	): Promise<any> {
 		try {
 			const res = await account.authClient.request({
-				url: `https://cloudcode-pa.googleapis.com/v1internal:${method}`,
+				baseURL: "https://cloudcode-pa.googleapis.com",
+				url: `/v1internal:${method}`,
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
 				},
 				responseType: "json",
-				data: JSON.stringify(body),
+				data: body,
 				signal: signal,
 				// Use the provided agent, or default to the main httpAgent
 				agent: agent || (this.httpAgent as any),
