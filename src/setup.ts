@@ -6,6 +6,8 @@ import inquirer from "inquirer"
 import open from "open"
 
 // --- Static Configuration ---
+const OAUTH_CLIENT_ID = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
+const OAUTH_CLIENT_SECRET = "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"
 const OAUTH_REDIRECT_URI = "http://localhost:45289"
 
 // --- Type Definitions ---
@@ -42,27 +44,15 @@ export class AuthManager {
 
 	private async addNewAccount(): Promise<void> {
 		try {
-			const { projectId, clientId, clientSecret } = await inquirer.prompt([
+			const { projectId } = await inquirer.prompt([
 				{
 					type: "input",
 					name: "projectId",
 					message: "Enter the Google Cloud Project ID for this account:",
 					validate: (input) => !!input || "Project ID cannot be empty.",
 				},
-				{
-					type: "password",
-					name: "clientId",
-					message: "Enter the OAuth Client ID:",
-					validate: (input) => !!input || "Client ID cannot be empty.",
-				},
-				{
-					type: "password",
-					name: "clientSecret",
-					message: "Enter the OAuth Client Secret:",
-					validate: (input) => !!input || "Client Secret cannot be empty.",
-				},
 			])
-			const credentials = await this.runAuthProcess(clientId, clientSecret)
+			const credentials = await this.runAuthProcess(OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET)
 			if (credentials) {
 				// Construct the final configuration to match the required format
 				const finalConfig = { projectId, credentials }
