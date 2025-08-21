@@ -32,15 +32,16 @@ describe("AuthManager", () => {
 			.mockResolvedValueOnce({ action: "Add a new Gemini account" })
 			.mockResolvedValueOnce({
 				projectId: "test-project",
-				clientId: "test-client-id",
-				clientSecret: "test-client-secret",
 			})
 			.mockResolvedValueOnce({ action: "Exit" })
 
 		await authManager.startAuthFlow()
 
 		// Verify that the auth process was called with the correct credentials
-		expect(runAuthProcessSpy).toHaveBeenCalledWith("test-client-id", "test-client-secret")
+		expect(runAuthProcessSpy).toHaveBeenCalledWith(
+			"681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com",
+			"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",
+		)
 
 		// Verify that file was "written"
 		const expectedPath = path.join(mockCredentialsPath, "test-project.json")

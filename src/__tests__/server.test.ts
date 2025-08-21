@@ -7,9 +7,12 @@ import * as path from "path"
 jest.mock("../services/gemini-account-pool")
 jest.mock("../routes/chat")
 
+import { FastifyInstance } from "fastify"
+
 describe("Server Builder", () => {
 	let originalEnv: NodeJS.ProcessEnv
 	let mockExit: jest.SpyInstance
+	let server: FastifyInstance
 
 	beforeEach(() => {
 		// Reset mocks before each test
@@ -23,16 +26,19 @@ describe("Server Builder", () => {
 		mockExit = jest.spyOn(process, "exit").mockImplementation((() => {}) as any)
 	})
 
-	afterEach(() => {
+	afterEach(async () => {
 		// Restore original environment variables and mocks
 		process.env = originalEnv
 		mockExit.mockRestore()
+		if (server) {
+			await server.close()
+		}
 	})
 
 	it("should build the server correctly", () => {
 		process.env.PROXY = "http://proxy.test"
 
-		const server = buildServer()
+		server = buildServer()
 		const expectedPath = path.resolve("./accounts")
 
 		expect(server).toBeDefined()

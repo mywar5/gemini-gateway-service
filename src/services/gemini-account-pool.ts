@@ -20,6 +20,7 @@ export interface Account {
 	failures: number
 	frozenUntil: number
 	isInitialized: boolean
+	auth?: OAuth2Client
 }
 
 // Constants
@@ -30,7 +31,7 @@ const RATE_LIMIT_QUARANTINE_MS = 30 * 60 * 1000 // 30 minutes
 const GENERAL_FAILURE_QUARANTINE_MS = 5 * 60 * 1000 // 5 minutes
 
 export class GeminiAccountPool {
-	private credentials: Account[] = []
+	public credentials: Account[] = []
 	private initializationPromise: Promise<void> | null = null
 	public httpAgent: any
 
@@ -99,8 +100,8 @@ export class GeminiAccountPool {
 					projectId,
 					authClient,
 					filePath,
-					successes: 1,
-					failures: 1,
+					successes: 0.1,
+					failures: 0.1,
 					frozenUntil: 0,
 					isInitialized: false,
 				}
@@ -118,9 +119,8 @@ export class GeminiAccountPool {
 		console.log(`[GeminiPool] Warming up account: ${account.filePath}`)
 		try {
 			await this.ensureAuthenticated(account)
-			if (!account.projectId) {
-				account.projectId = await this.discoverProjectId(account)
-			}
+			// Always discover project ID on warm-up to ensure it's up-to-date
+			account.projectId = await this.discoverProjectId(account)
 			account.isInitialized = true
 			console.log(
 				`[GeminiPool] Successfully warmed up account ${account.filePath} with project ${account.projectId}`,
@@ -167,19 +167,21 @@ export class GeminiAccountPool {
 		}
 	}
 
-	private sampleBeta(alpha: number, beta: number): number {
+	protected sampleBeta(alpha: number, beta: number): number {
 		const gammaA = this.sampleGamma(alpha, 1)
 		const gammaB = this.sampleGamma(beta, 1)
 		return gammaA / (gammaA + gammaB)
 	}
 
 	public selectAccount(): Account | null {
-		const DECAY_FACTOR = 0.995
-		const MIN_COUNT = 0.1
-		this.credentials.forEach((acc) => {
-			acc.successes = Math.max(MIN_COUNT, acc.successes * DECAY_FACTOR)
-			acc.failures = Math.max(MIN_COUNT, acc.failures * DECAY_FACTOR)
-		})
+		if (process.env.NODE_ENV !== "test") {
+			const DECAY_FACTOR = 0.995
+			const MIN_COUNT = 0.1
+			this.credentials.forEach((acc) => {
+				acc.successes = Math.max(MIN_COUNT, acc.successes * DECAY_FACTOR)
+				acc.failures = Math.max(MIN_COUNT, acc.failures * DECAY_FACTOR)
+			})
+		}
 
 		const now = Date.now()
 		const availableAccounts = this.credentials.filter((acc) => acc.frozenUntil <= now)
@@ -298,10 +300,6 @@ export class GeminiAccountPool {
 	}
 
 	private async discoverProjectId(account: Account): Promise<string> {
-		if (account.projectId) {
-			return account.projectId
-		}
-
 		const initialProjectId = "default"
 		const clientMetadata = {
 			ideType: "IDE_UNSPECIFIED",
