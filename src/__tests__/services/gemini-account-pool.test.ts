@@ -3,7 +3,12 @@ import * as fs from "fs/promises"
 import { OAuth2Client } from "google-auth-library"
 
 // Mocking dependencies
-jest.mock("fs/promises")
+jest.mock("fs/promises", () => ({
+	readdir: jest.fn(),
+	readFile: jest.fn(),
+	writeFile: jest.fn(),
+	mkdir: jest.fn(),
+}))
 
 jest.mock("google-auth-library", () => {
 	const mockOAuth2Client = {
@@ -85,8 +90,9 @@ describe("GeminiAccountPool", () => {
 				},
 			} as unknown as Account,
 		]
-		;(fs.readdir as jest.Mock).mockResolvedValue(mockAccounts.map((a) => a.filePath))
-		;(fs.readFile as jest.Mock).mockImplementation((filePath) => {
+		const mockedFs = fs as jest.Mocked<typeof fs>
+		mockedFs.readdir.mockResolvedValue(mockAccounts.map((a) => a.filePath) as any)
+		mockedFs.readFile.mockImplementation((filePath) => {
 			const account = mockAccounts.find((a) => filePath.toString().includes(a.filePath))
 			return Promise.resolve(JSON.stringify({ credentials: account?.credentials }))
 		})
@@ -110,7 +116,8 @@ describe("GeminiAccountPool", () => {
 		})
 
 		it("should throw an error if no valid credential files are found", async () => {
-			;(fs.readdir as jest.Mock).mockResolvedValue([])
+			const mockedFs = fs as jest.Mocked<typeof fs>
+			mockedFs.readdir.mockResolvedValue([] as any)
 			pool = new GeminiAccountPool(credentialsPath)
 			await expect((pool as any).initializationPromise).rejects.toThrow("No valid credential files found.")
 		})

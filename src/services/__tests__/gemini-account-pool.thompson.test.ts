@@ -4,7 +4,12 @@ import { OAuth2Client } from "google-auth-library"
 import * as path from "path"
 
 // Mock dependencies
-jest.mock("fs/promises")
+jest.mock("fs/promises", () => ({
+	readdir: jest.fn(),
+	readFile: jest.fn(),
+	writeFile: jest.fn(),
+	mkdir: jest.fn(),
+}))
 jest.mock("google-auth-library")
 
 const mockFs = fs as jest.Mocked<typeof fs>

@@ -6,7 +6,12 @@ import * as path from "path"
 // Mock the external dependencies
 jest.mock("inquirer")
 jest.mock("open", () => jest.fn())
-jest.mock("fs/promises")
+jest.mock("fs/promises", () => ({
+	readdir: jest.fn(),
+	readFile: jest.fn(),
+	writeFile: jest.fn(),
+	mkdir: jest.fn(),
+}))
 
 describe("AuthManager", () => {
 	let authManager: AuthManager

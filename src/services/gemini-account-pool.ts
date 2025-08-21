@@ -76,7 +76,8 @@ export class GeminiAccountPool {
 				(config): config is { filePath: string; parsedData: any } => config !== null,
 			)
 		} catch (error) {
-			throw new Error(`[GeminiPool] Multi-account load failed: ${error}`)
+			console.error(`[GeminiPool] Failed to read credentials directory: ${error}`)
+			accountConfigs = []
 		}
 
 		if (accountConfigs.length === 0) {
@@ -222,47 +223,72 @@ export class GeminiAccountPool {
 	): Promise<T> {
 		await this.initializationPromise
 
-		if (signal?.aborted) {
-			throw new Error("Request aborted by caller.")
-		}
+		const attemptedAccounts = new Set<string>()
 
-		const account = this.selectAccount()
-
-		if (!account) {
-			throw new Error("[GeminiPool] All credentials failed or are frozen.")
-		}
-
-		try {
-			await this.ensureAuthenticated(account)
-			if (!account.isInitialized) {
-				await this.warmUpAccount(account)
+		// Loop for a number of times equal to the number of credentials, plus a buffer
+		for (let i = 0; i < this.credentials.length + 1; i++) {
+			if (signal?.aborted) {
+				throw new Error("Request aborted by caller.")
 			}
 
-			if (!account.projectId) {
-				throw new Error(`Account ${account.filePath} could not discover a project ID.`)
+			const account = this.selectAccount()
+
+			if (!account) {
+				// This happens if all accounts are frozen
+				break
 			}
 
-			const result = await requestExecutor(account, account.projectId)
-			account.successes++
-			return result
-		} catch (error: any) {
-			console.error(`[GeminiPool] Account ${account.filePath} failed. Error: ${error.message}`)
-			account.failures++
-
-			const jitter = Math.random() * 1000
-			let baseCooldown = GENERAL_FAILURE_QUARANTINE_MS
-			if (error.response?.status === 429) {
-				baseCooldown = RATE_LIMIT_QUARANTINE_MS
+			// Avoid retrying the same account if it has already been tried in this request flow
+			if (attemptedAccounts.has(account.filePath)) {
+				// If we have already tried all accounts, break
+				if (attemptedAccounts.size === this.credentials.filter((acc) => acc.frozenUntil <= Date.now()).length) {
+					break
+				}
+				continue
 			}
-			const backoffMultiplier = Math.pow(2, Math.min(account.failures - 1, 4))
-			const cooldownDuration = Math.min(baseCooldown * backoffMultiplier, 60 * 60 * 1000) + jitter
+			attemptedAccounts.add(account.filePath)
 
-			account.frozenUntil = Date.now() + cooldownDuration
-			console.warn(`[GeminiPool] Account ${account.filePath} frozen for ${cooldownDuration / 1000}s.`)
+			try {
+				await this.ensureAuthenticated(account)
+				if (!account.isInitialized) {
+					await this.warmUpAccount(account)
+					// If warm-up fails, the account is frozen, so we should continue to the next
+					if (account.frozenUntil > Date.now()) {
+						continue
+					}
+				}
 
-			// Retry with another account
-			return this.executeRequest(requestExecutor, signal)
+				if (!account.projectId) {
+					throw new Error(`Account ${account.filePath} could not discover a project ID.`)
+				}
+
+				const result = await requestExecutor(account, account.projectId)
+				account.successes++
+				return result // Success, exit the loop and return
+			} catch (error: any) {
+				console.error(`[GeminiPool] Account ${account.filePath} failed. Error: ${error.message}`)
+				account.failures++
+
+				const isRateLimit = error.response?.status === 429
+				const jitter = Math.random() * 1000
+				const baseCooldown = isRateLimit ? RATE_LIMIT_QUARANTINE_MS : GENERAL_FAILURE_QUARANTINE_MS
+
+				const backoffMultiplier = Math.pow(2, Math.min(account.failures - 1, 4))
+				const cooldownDuration = Math.min(baseCooldown * backoffMultiplier, 60 * 60 * 1000) + jitter
+
+				account.frozenUntil = Date.now() + cooldownDuration
+				console.warn(
+					`[GeminiPool] Account ${
+						account.filePath
+					} frozen for ${cooldownDuration / 1000}s due to ${isRateLimit ? "rate limit" : "failure"}.`,
+				)
+
+				// Continue to the next iteration of the loop to try another account
+			}
 		}
+
+		// If the loop completes without returning, all accounts have failed.
+		throw new Error("[GeminiPool] All credentials failed or are frozen.")
 	}
 
 	private async ensureAuthenticated(account: Account): Promise<void> {
@@ -380,12 +406,13 @@ export class GeminiAccountPool {
 			})
 			return res.data
 		} catch (error: any) {
-			console.error(`[GeminiPool] Error calling ${method} for account ${account.filePath}:`, error.message)
 			if (error.response?.status === 401 && retryAuth) {
 				console.log(`[GeminiPool] Received 401, attempting token refresh for ${account.filePath}`)
 				await this.ensureAuthenticated(account)
-				return this.callEndpoint(account, method, body, false)
+				// After refreshing, retry the request once without allowing further retries on auth failure.
+				return this.callEndpoint(account, method, body, false, signal)
 			}
+			console.error(`[GeminiPool] Error calling ${method} for account ${account.filePath}:`, error.message)
 			throw error
 		}
 	}

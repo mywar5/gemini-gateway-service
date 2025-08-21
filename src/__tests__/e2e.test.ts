@@ -4,7 +4,12 @@ import * as fs from "fs/promises"
 import { Readable } from "stream"
 
 // Mock dependencies at the top level
-jest.mock("fs/promises")
+jest.mock("fs/promises", () => ({
+	readdir: jest.fn(),
+	readFile: jest.fn(),
+	writeFile: jest.fn(),
+	mkdir: jest.fn(),
+}))
 jest.mock("google-auth-library", () => {
 	const mockRequest = jest.fn().mockImplementation(async (config: any) => {
 		if (config.url.includes("streamGenerateContent")) {

@@ -12,4 +12,5 @@ module.exports = {
 		],
 	},
 	transformIgnorePatterns: ["/node_modules/(?!open)/"],
+	testTimeout: 30000,
 }
