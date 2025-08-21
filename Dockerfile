@@ -20,8 +20,13 @@ FROM node:18-alpine
 
 WORKDIR /app
 
-# Copy only necessary files from the builder stage
-COPY --from=builder /app/node_modules ./node_modules
+# Copy package.json and package-lock.json to leverage Docker cache
+COPY package*.json ./
+
+# Install production dependencies
+RUN npm install --production
+
+# Copy built application and other necessary files
 COPY --from=builder /app/dist ./dist
 COPY package.json .
 
