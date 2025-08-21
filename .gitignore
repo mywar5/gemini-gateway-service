@@ -30,5 +30,3 @@ lerna-debug.log*
 
 # Test reports
 coverage
-# Account credentials
-/accounts
