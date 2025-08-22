@@ -43,13 +43,12 @@ export class GeminiAccountPool {
 		private credentialsPath: string,
 		private proxy?: string,
 	) {
-		// High-performance agent for the main chat API (with HTTP/2)
+		// High-performance agent for the main chat API
 		const chatAgentOptions: any = {
 			keepAlive: true,
 			maxSockets: 100,
 			maxFreeSockets: 10,
 			scheduling: "lifo",
-			http2: { enable: true },
 		}
 
 		// A more compatible, standard agent for the discovery API (without HTTP/2)

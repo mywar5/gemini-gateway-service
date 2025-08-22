@@ -121,7 +121,7 @@
           gemini-gateway:
             ...
             ports:
-              - "YOUR_PUBLIC_IP:8888:3000" # 将 YOUR_PUBLIC_IP 替换为您的公网IP, 8888 替换为您的目标端口
+              - "YOUR_PUBLIC_IP:3001:3000" # 将 YOUR_PUBLIC_IP 替换为您的公网IP, 8888 替换为您的目标端口
             ...
         ```
 
@@ -135,13 +135,13 @@
 
 您的 Gemini 网关现在已上线！
 
-- **API 端点**: `http://<YOUR_PUBLIC_IP>:8888/v1/chat/completions`
+- **API 端点**: `http://<YOUR_PUBLIC_IP>:3001/v1/chat/completions`
 - **API 密钥**: 不需要。您可以使用任何字符串。
 
 **`curl` 示例:**
 
 ```bash
-curl http://YOUR_PUBLIC_IP:8888/v1/chat/completions \
+curl http://YOUR_PUBLIC_IP:3001/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-anything" \
   -d '{

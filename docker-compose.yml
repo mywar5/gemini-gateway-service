@@ -6,6 +6,9 @@ services:
         container_name: gemini-gateway-service
         restart: unless-stopped
         ports:
-            - "YOUR_PUBLIC_IP:8888:3000"
+            - "<your_public_ip>:3001:3000"
+        environment:
+            - PUBLIC_IP=<your_public_ip>
+            - PUBLIC_PORT=3001
         volumes:
             - ./accounts:/app/accounts

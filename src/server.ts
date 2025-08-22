@@ -51,7 +51,12 @@ export const start = async () => {
 		}
 
 		await server.listen({ port, host })
-		server.log.info(`Server listening on ${host}:${port}`)
+
+		const publicIp = process.env.PUBLIC_IP || "YOUR_PUBLIC_IP"
+		const publicPort = process.env.PUBLIC_PORT || port
+
+		server.log.info(`Internal server listening at http://${host}:${port}`)
+		server.log.info(`Service is accessible externally at http://${publicIp}:${publicPort}`)
 	} catch (err) {
 		server.log.error(err)
 		process.exit(1)

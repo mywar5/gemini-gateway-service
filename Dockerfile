@@ -36,8 +36,8 @@ EXPOSE 3000
 # Set environment variables (placeholders)
 # These should be set during the 'docker run' command
 ENV NODE_ENV=production
-# ENV PORT=3000
-# ENV HOST=0.0.0.0
+ENV PORT=3000
+ENV HOST=0.0.0.0
 # ENV ACCOUNTS_PATH=/path/to/your/credentials
 # ENV PROXY=http://your-proxy-url:port
 
