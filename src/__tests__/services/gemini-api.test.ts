@@ -92,7 +92,7 @@ describe("GeminiAccountPool - Google API Interaction", () => {
 		mockRequest.mockResolvedValue({ data: { success: true } })
 
 		// Act
-		await (pool as any).callEndpoint(account, methodName, requestBody, false)
+		await (pool as any).callEndpoint(account, methodName, requestBody, false, undefined, pool.httpAgent)
 
 		// Assert
 		expect(mockRequest).toHaveBeenCalledTimes(1)

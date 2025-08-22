@@ -1,6 +1,7 @@
 import { GeminiAccountPool } from "../gemini-account-pool"
 import * as fs from "fs/promises"
 import { OAuth2Client } from "google-auth-library"
+import { HttpsProxyAgent } from "hpagent"
 
 // Mock the external dependencies
 jest.mock("fs/promises", () => ({
@@ -9,8 +10,10 @@ jest.mock("fs/promises", () => ({
 	writeFile: jest.fn(),
 }))
 jest.mock("google-auth-library")
+jest.mock("hpagent")
 
 const mockedOAuth2Client = OAuth2Client as jest.MockedClass<typeof OAuth2Client>
+const mockedHpagent = HttpsProxyAgent as jest.MockedClass<typeof HttpsProxyAgent>
 
 describe("GeminiAccountPool Auth and Proxy", () => {
 	const credentialsPath = "/test/creds"
@@ -54,21 +57,17 @@ describe("GeminiAccountPool Auth and Proxy", () => {
 		}
 	})
 
-	it("should instantiate OAuth2Client with proxy agent when proxy is provided", async () => {
+	it("should instantiate HttpsProxyAgent with proxy options when proxy is provided", async () => {
 		// Initialize the pool with a proxy
 		pool = new GeminiAccountPool(credentialsPath, proxy)
 		await (pool as any).initializationPromise // Wait for initialization to complete
 
-		// Check if OAuth2Client was instantiated with the correct options
-		expect(mockedOAuth2Client).toHaveBeenCalledTimes(1)
-
-		// Check if OAuth2Client was instantiated with an agent
-		const constructorOptions = mockedOAuth2Client.mock.calls[0][0]
-		expect(constructorOptions).toBeDefined()
-		const agent = (constructorOptions as any).agent
-		expect(agent).toBeDefined()
-		expect(agent.proxy.hostname).toBe("proxy.example.com")
-		expect(agent.proxy.port).toBe("8080")
+		// Check if HttpsProxyAgent was instantiated with the correct options
+		expect(mockedHpagent).toHaveBeenCalledWith(
+			expect.objectContaining({
+				proxy: proxy,
+			}),
+		)
 	})
 
 	it("should use the proxied agent for refreshing tokens", async () => {

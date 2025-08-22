@@ -49,6 +49,9 @@ export class GeminiAccountPool {
 			maxSockets: 100,
 			maxFreeSockets: 10,
 			scheduling: "lifo",
+			http2: {
+				enable: true, // Force HTTP/2 for chat endpoint
+			},
 		}
 
 		// A more compatible, standard agent for the discovery API (without HTTP/2)
@@ -60,7 +63,7 @@ export class GeminiAccountPool {
 		}
 
 		if (this.proxy) {
-			// FIX: Directly use the proxy string. The 'hpagent' library expects a string URL.
+			console.log(`[GeminiPool] Using proxy: ${this.proxy}`)
 			chatAgentOptions.proxy = this.proxy
 			discoveryAgentOptions.proxy = this.proxy
 		}
@@ -155,6 +158,7 @@ export class GeminiAccountPool {
 			const jitter = Math.random() * 1000
 			const cooldownDuration = GENERAL_FAILURE_QUARANTINE_MS + jitter
 			account.frozenUntil = Date.now() + cooldownDuration
+			account.isInitialized = false
 			console.warn(
 				`[GeminiPool] Account ${account.filePath} frozen for ${cooldownDuration / 1000}s due to warm-up failure.`,
 			)
@@ -453,8 +457,7 @@ export class GeminiAccountPool {
 				responseType: "json",
 				data: JSON.stringify(body),
 				signal: signal,
-				// Use the provided agent, or default to the main httpAgent
-				agent: agent || (this.httpAgent as any),
+				agent: agent,
 			})
 			return res.data
 		} catch (error: any) {
