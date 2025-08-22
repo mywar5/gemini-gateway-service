@@ -228,7 +228,7 @@ export class GeminiAccountPool {
 
 	public async executeRequest<T>(
 		requestExecutor: (
-			callApi: (method: string, body: any, signal?: AbortSignal) => Promise<any>,
+			callApi: (urlOrMethod: string, body: any, signal?: AbortSignal) => Promise<any>,
 			projectId: string,
 		) => Promise<T>,
 		signal?: AbortSignal,
@@ -268,8 +268,8 @@ export class GeminiAccountPool {
 					throw new Error(`Account ${account.filePath} could not discover a project ID.`)
 				}
 
-				const callApi = (method: string, body: any, apiSignal?: AbortSignal) =>
-					this.callEndpoint(account, method, body, true, apiSignal)
+				const callApi = (urlOrMethod: string, body: any, apiSignal?: AbortSignal) =>
+					this.callEndpoint(account, urlOrMethod, body, true, apiSignal)
 
 				const result = await requestExecutor(callApi, account.projectId)
 				account.successes++
@@ -404,14 +404,17 @@ export class GeminiAccountPool {
 
 	private async callEndpoint(
 		account: Account,
-		method: string,
+		urlOrMethod: string,
 		body: any,
 		retryAuth: boolean = true,
 		signal?: AbortSignal,
 	): Promise<any> {
+		const isFullUrl = urlOrMethod.startsWith("http")
+		const url = isFullUrl ? urlOrMethod : `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${urlOrMethod}`
+
 		try {
 			const res = await account.authClient.request({
-				url: `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${method}`,
+				url,
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
@@ -423,11 +426,11 @@ export class GeminiAccountPool {
 			})
 			return res.data
 		} catch (error: any) {
-			console.error(`[GeminiPool] Error calling ${method} for account ${account.filePath}:`, error.message)
+			console.error(`[GeminiPool] Error calling ${url} for account ${account.filePath}:`, error.message)
 			if (error.response?.status === 401 && retryAuth) {
 				console.log(`[GeminiPool] Received 401, attempting token refresh for ${account.filePath}`)
 				await this.ensureAuthenticated(account)
-				return this.callEndpoint(account, method, body, false)
+				return this.callEndpoint(account, urlOrMethod, body, false)
 			}
 			throw error
 		}
