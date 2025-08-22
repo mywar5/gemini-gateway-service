@@ -422,7 +422,7 @@ export class GeminiAccountPool {
 				responseType: "json",
 				data: JSON.stringify(body),
 				signal: signal,
-				agent: this.httpAgent as any,
+				agent: this.httpAgent,
 			})
 			return res.data
 		} catch (error: any) {
