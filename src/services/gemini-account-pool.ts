@@ -143,8 +143,11 @@ export class GeminiAccountPool {
 		console.log(`[GeminiPool] Warming up account: ${account.filePath}`)
 		try {
 			await this.ensureAuthenticated(account)
-			// Always discover project ID on warm-up to ensure it's up-to-date
-			account.projectId = await this.discoverProjectId(account)
+			// If projectId is not present in the file, discover it.
+			if (!account.projectId) {
+				console.log(`[GeminiPool] Project ID for ${account.filePath} not found, discovering...`)
+				account.projectId = await this.discoverProjectId(account)
+			}
 			account.isInitialized = true
 			console.log(
 				`[GeminiPool] Successfully warmed up account ${account.filePath} with project ${account.projectId}`,
