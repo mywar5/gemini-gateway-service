@@ -419,7 +419,7 @@ export class GeminiAccountPool {
 		signal?: AbortSignal,
 	): Promise<any> {
 		const isFullUrl = urlOrMethod.startsWith("http")
-		const url = isFullUrl ? urlOrMethod : `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${urlOrMethod}`
+		const url = isFullUrl ? urlOrMethod : `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}/${urlOrMethod}`
 		// Dynamically set responseType based on whether the call is for a stream
 		const responseType = url.includes(":stream") ? "stream" : "json"
 		// Use the high-performance agent only for non-stream requests due to a bug in gaxios with stream + agent
