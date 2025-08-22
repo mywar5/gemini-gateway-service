@@ -28,6 +28,15 @@ export function registerChatRoutes(server: FastifyInstance) {
 			try {
 				const geminiMessages = convertToGeminiMessages(body.messages)
 
+				// Manually create an AbortController to handle client connection closing.
+				const abortController = new AbortController()
+				request.raw.on("close", () => {
+					if (request.raw.aborted) {
+						server.log.warn("Client connection closed, aborting Gemini request.")
+						abortController.abort()
+					}
+				})
+
 				const stream = await server.accountPool.executeRequest(async (callApi, projectId) => {
 					const modelId = body.model.includes("/") ? body.model.split("/").pop() : body.model
 					const url = `projects/${projectId}/models/${modelId}:streamGenerateContent`
@@ -36,7 +45,7 @@ export function registerChatRoutes(server: FastifyInstance) {
 						{
 							contents: geminiMessages,
 						},
-						request.signal,
+						abortController.signal, // Pass the signal from our controller
 					)
 					return responseStream as Readable
 				})
