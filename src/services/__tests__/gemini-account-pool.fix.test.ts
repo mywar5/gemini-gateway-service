@@ -74,13 +74,12 @@ describe("GeminiAccountPool Project ID Discovery Fix", () => {
 		await (pool as any).initializationPromise
 
 		// 3. Assertion: Verify the fix
-		const account = pool.credentials[0]
 		// The crucial check: ensure `request` was called with the correct structure
 		expect(mockClientInstance.request).toHaveBeenCalledWith(
 			expect.objectContaining({
 				url: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
 				method: "POST",
-				data: expect.any(String),
+				data: expect.any(Object),
 			}),
 		)
 		// Ensure it also saved the newly discovered project ID

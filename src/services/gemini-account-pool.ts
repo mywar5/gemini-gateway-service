@@ -47,6 +47,9 @@ export class GeminiAccountPool {
 			maxSockets: 100,
 			maxFreeSockets: 10,
 			scheduling: "lifo",
+			http2: {
+				enable: true, // Force HTTP/2
+			},
 		}
 
 		if (this.proxy) {
@@ -412,13 +415,13 @@ export class GeminiAccountPool {
 	): Promise<any> {
 		try {
 			const res = await account.authClient.request({
-				url: `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}/${method}`,
+				url: `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${method}`,
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
 				},
 				responseType: "json",
-				body: JSON.stringify(body),
+				data: body,
 				signal: signal,
 				agent: this.httpAgent,
 			})

@@ -3,6 +3,7 @@ import { HttpsProxyAgent } from "hpagent"
 import { OAuth2Client } from "google-auth-library"
 import * as fs from "fs/promises"
 import { jest } from "@jest/globals"
+import { GaxiosOptions, GaxiosResponse } from "gaxios"
 
 // Mock the external dependencies
 jest.mock("hpagent")
@@ -14,12 +15,12 @@ jest.mock("fs/promises", () => ({
 	mkdir: jest.fn(),
 }))
 
-const mockOAuth2Client = OAuth2Client as jest.MockedClass<typeof OAuth2Client>
 const mockHttpsProxyAgent = HttpsProxyAgent as jest.MockedClass<typeof HttpsProxyAgent>
 
 describe("GeminiAccountPool", () => {
 	let pool: GeminiAccountPool
 	const mockCredentialsPath = "/fake/credentials"
+	let mockRequest: jest.Mock<(options: GaxiosOptions) => Promise<GaxiosResponse<any>>>
 
 	beforeEach(() => {
 		// Reset mocks before each test
@@ -30,7 +31,7 @@ describe("GeminiAccountPool", () => {
 		mockedFs.readdir.mockResolvedValue(["account1.json"] as any)
 		mockedFs.readFile.mockResolvedValue(
 			JSON.stringify({
-				projectId: null, // Start with no project ID to force discovery
+				projectId: "pre-existing-project-id", // Start with a project ID
 				credentials: {
 					access_token: "fake_access_token",
 					refresh_token: "fake_refresh_token",
@@ -40,76 +41,74 @@ describe("GeminiAccountPool", () => {
 		)
 
 		// Mock the OAuth2Client's request method
-		const mockRequest = jest.fn<() => Promise<any>>()
-		mockRequest.mockResolvedValueOnce({
-			// First call for loadCodeAssist
-			data: {
-				allowedTiers: [{ id: "free-tier", isDefault: true }],
-			},
-		})
-		mockRequest.mockResolvedValueOnce({
-			// Second call for onboardUser (LRO start)
-			data: {
-				done: false,
-				name: "operations/123",
-			},
-		})
-		mockRequest.mockResolvedValue({
-			// Subsequent calls for LRO polling and final result
-			data: {
-				done: true,
-				response: {
-					cloudaicompanionProject: {
-						id: "discovered-project-id",
-					},
-				},
-			},
-		})
+		mockRequest = jest.fn()
+		jest.spyOn(OAuth2Client.prototype, "request").mockImplementation(mockRequest)
 
-		mockOAuth2Client.prototype.request = mockRequest as any
+		// Instantiate the pool for each test
+		pool = new GeminiAccountPool(mockCredentialsPath)
 	})
 
-	it("should use the discoveryAgent for project ID discovery", async () => {
-		// Instantiate the pool, which triggers initialization
-		pool = new GeminiAccountPool(mockCredentialsPath)
-
-		// Wait for the initialization to complete
-		// @ts-ignore - Accessing private property for testing
-		await pool.initializationPromise
-
-		// Verify that HttpsProxyAgent was instantiated twice with different options
-		expect(mockHttpsProxyAgent).toHaveBeenCalledTimes(2)
-
-		// Chat agent with HTTP/2 enabled
+	it("should initialize with http2-enabled agent", () => {
+		expect(mockHttpsProxyAgent).toHaveBeenCalledTimes(1)
 		expect(mockHttpsProxyAgent).toHaveBeenCalledWith(
 			expect.objectContaining({
 				http2: { enable: true },
 			}),
 		)
+	})
 
-		// Discovery agent without HTTP/2 enabled
-		expect(mockHttpsProxyAgent).toHaveBeenCalledWith(
-			expect.not.objectContaining({
-				http2: expect.anything(),
-			}),
-		)
+	it("should make successful API calls with correct parameters", async () => {
+		// @ts-ignore - Accessing private property for testing
+		await pool.initializationPromise
 
-		// Get the instances of the mocked agents
-		const chatAgentInstance = mockHttpsProxyAgent.mock.results[0].value
+		const mockApiResponse = {
+			data: { success: true },
+			status: 200,
+			statusText: "OK",
+			headers: {},
+			config: {},
+		} as GaxiosResponse
+		mockRequest.mockResolvedValue(mockApiResponse)
 
-		// Verify that the discovery calls used the correct agent
-		const requestCalls = (mockOAuth2Client.prototype.request as jest.Mock).mock.calls
-		const discoveryCalls = requestCalls.filter(
-			(call: any) =>
-				typeof call[0]?.url === "string" &&
-				(call[0].url.includes("loadCodeAssist") || call[0].url.includes("onboardUser")),
-		)
+		const testMethod = "testMethod"
+		const testBody = { key: "value" }
 
-		expect(discoveryCalls.length).toBeGreaterThan(0)
-		discoveryCalls.forEach((call: any) => {
-			const agentUsed = call[0].agent
-			expect(agentUsed).toBeDefined()
-			expect(agentUsed).not.toBe(chatAgentInstance)
+		const result = await pool.executeRequest(async (callApi, projectId) => {
+			expect(projectId).toBe("pre-existing-project-id")
+			return callApi(testMethod, testBody)
 		})
+
+		expect(result).toEqual(mockApiResponse.data)
+		expect(mockRequest).toHaveBeenCalledTimes(1)
+		const requestConfig = mockRequest.mock.calls[0][0]
+
+		// Verify the URL format is correct (using ':')
+		expect(requestConfig.url).toContain(`:${testMethod}`)
+
+		// Verify the request body is passed in 'data' property
+		expect(requestConfig.data).toEqual(testBody)
+		expect(requestConfig.body).toBeUndefined()
+
+		// Verify the http2-enabled agent is used
+		expect(requestConfig.agent).toBe(pool.httpAgent)
+	})
+
+	it("should handle API call failures and freeze the account", async () => {
+		// @ts-ignore
+		await pool.initializationPromise
+
+		const apiError = new Error("API Failure") as any
+		apiError.response = { status: 500 }
+		mockRequest.mockRejectedValue(apiError)
+
+		await expect(
+			pool.executeRequest(async (callApi) => {
+				return callApi("failingMethod", {})
+			}),
+		).rejects.toThrow("All credentials failed or are frozen.")
+
+		const account = pool.credentials[0]
+		expect(account.failures).toBeGreaterThan(0.1)
+		expect(account.frozenUntil).toBeGreaterThan(Date.now())
 	})
 })
