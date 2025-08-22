@@ -19,13 +19,44 @@ export interface GeminiContent {
  * @returns The array of Gemini content.
  */
 export function convertToGeminiMessages(messages: OpenAIChatMessage[]): GeminiContent[] {
-	// Basic transformation logic, will need to be more robust
-	return messages
-		.filter((msg) => msg.role === "user" || msg.role === "assistant")
-		.map((msg) => ({
-			role: msg.role === "assistant" ? "model" : "user",
-			parts: [{ text: msg.content }],
-		}))
+	const result: GeminiContent[] = []
+	let systemMessage: string | null = null
+	const otherMessages: OpenAIChatMessage[] = []
+
+	// Separate system messages from the rest
+	for (const msg of messages) {
+		if (msg.role === "system") {
+			// Concatenate multiple system messages
+			systemMessage = systemMessage ? `${systemMessage}\n\n${msg.content}` : msg.content
+		} else if (msg.role === "user" || msg.role === "assistant") {
+			otherMessages.push(msg)
+		}
+	}
+
+	// Process user and assistant messages
+	for (let i = 0; i < otherMessages.length; i++) {
+		const msg = otherMessages[i]
+		const role = msg.role === "assistant" ? "model" : "user"
+		let content = msg.content
+
+		// Prepend system message to the first user message
+		if (i === 0 && role === "user" && systemMessage) {
+			content = `${systemMessage}\n\n${content}`
+		}
+
+		// Merge consecutive messages from the same role
+		if (result.length > 0 && result[result.length - 1].role === role) {
+			const lastPart = result[result.length - 1].parts[0]
+			lastPart.text = lastPart.text ? `${lastPart.text}\n\n${content}` : content
+		} else {
+			result.push({
+				role,
+				parts: [{ text: content }],
+			})
+		}
+	}
+
+	return result
 }
 
 /**
