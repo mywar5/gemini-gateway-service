@@ -104,15 +104,11 @@ export class GeminiAccountPool {
 					console.error(`[GeminiPool] Incomplete credential file, skipping: ${filePath}`)
 					return null
 				}
-				const clientOptions: any = {
+				const authClient = new OAuth2Client({
 					clientId: OAUTH_CLIENT_ID,
 					clientSecret: OAUTH_CLIENT_SECRET,
 					redirectUri: OAUTH_REDIRECT_URI,
-				}
-				if (this.proxy) {
-					clientOptions.agent = this.discoveryAgent
-				}
-				const authClient = new OAuth2Client(clientOptions)
+				})
 				authClient.setCredentials({
 					access_token: credentials.access_token,
 					refresh_token: credentials.refresh_token,
@@ -242,29 +238,27 @@ export class GeminiAccountPool {
 	}
 
 	public async executeRequest<T>(
-		requestExecutor: (account: Account, projectId: string) => Promise<T>,
+		requestExecutor: (
+			callApi: (method: string, body: any, signal?: AbortSignal) => Promise<any>,
+			projectId: string,
+		) => Promise<T>,
 		signal?: AbortSignal,
 	): Promise<T> {
 		await this.initializationPromise
 
 		const attemptedAccounts = new Set<string>()
 
-		// Loop for a number of times equal to the number of credentials, plus a buffer
 		for (let i = 0; i < this.credentials.length + 1; i++) {
 			if (signal?.aborted) {
 				throw new Error("Request aborted by caller.")
 			}
 
 			const account = this.selectAccount()
-
 			if (!account) {
-				// This happens if all accounts are frozen
 				break
 			}
 
-			// Avoid retrying the same account if it has already been tried in this request flow
 			if (attemptedAccounts.has(account.filePath)) {
-				// If we have already tried all accounts, break
 				if (attemptedAccounts.size === this.credentials.filter((acc) => acc.frozenUntil <= Date.now()).length) {
 					break
 				}
@@ -276,7 +270,6 @@ export class GeminiAccountPool {
 				await this.ensureAuthenticated(account)
 				if (!account.isInitialized) {
 					await this.warmUpAccount(account)
-					// If warm-up fails, the account is frozen, so we should continue to the next
 					if (account.frozenUntil > Date.now()) {
 						continue
 					}
@@ -286,9 +279,12 @@ export class GeminiAccountPool {
 					throw new Error(`Account ${account.filePath} could not discover a project ID.`)
 				}
 
-				const result = await requestExecutor(account, account.projectId)
+				const callApi = (method: string, body: any, apiSignal?: AbortSignal) =>
+					this.callEndpoint(account, method, body, true, apiSignal, this.httpAgent)
+
+				const result = await requestExecutor(callApi, account.projectId)
 				account.successes++
-				return result // Success, exit the loop and return
+				return result
 			} catch (error: any) {
 				console.error(`[GeminiPool] Account ${account.filePath} failed. Error: ${error.message}`)
 				account.failures++
@@ -296,7 +292,6 @@ export class GeminiAccountPool {
 				const isRateLimit = error.response && error.response.status === 429
 				const jitter = Math.random() * 1000
 				const baseCooldown = isRateLimit ? RATE_LIMIT_QUARANTINE_MS : GENERAL_FAILURE_QUARANTINE_MS
-
 				const backoffMultiplier = Math.pow(2, Math.min(account.failures - 1, 4))
 				const cooldownDuration = Math.min(baseCooldown * backoffMultiplier, 60 * 60 * 1000) + jitter
 
@@ -306,12 +301,9 @@ export class GeminiAccountPool {
 						account.filePath
 					} frozen for ${cooldownDuration / 1000}s due to ${isRateLimit ? "rate limit" : "failure"}.`,
 				)
-
-				// Continue to the next iteration of the loop to try another account
 			}
 		}
 
-		// If the loop completes without returning, all accounts have failed.
 		throw new Error("[GeminiPool] All credentials failed or are frozen.")
 	}
 

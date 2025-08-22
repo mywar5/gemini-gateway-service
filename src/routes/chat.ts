@@ -28,22 +28,13 @@ export function registerChatRoutes(server: FastifyInstance) {
 			try {
 				const geminiMessages = convertToGeminiMessages(body.messages)
 
-				const requestExecutor = async (account: any, _projectId: string) => {
-					const url = `https://generativelanguage.googleapis.com/v1beta/models/${body.model}:streamGenerateContent`
-
-					const response = await account.authClient.request({
-						url,
-						method: "POST",
-						data: { contents: geminiMessages },
-						responseType: "stream",
-						headers: { "Content-Type": "application/json" },
-						agent: server.accountPool.httpAgent,
-					})
-
-					return response.data as Readable
-				}
-
-				const stream = await server.accountPool.executeRequest(requestExecutor)
+				const stream = await server.accountPool.executeRequest(async (callApi) => {
+					const responseStream = await callApi(
+						`https://generativelanguage.googleapis.com/v1beta/models/${body.model}:streamGenerateContent`,
+						{ contents: geminiMessages },
+					)
+					return responseStream as Readable
+				})
 
 				for await (const chunk of stream) {
 					// Assuming the chunk is a buffer that needs to be parsed
