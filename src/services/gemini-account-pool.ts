@@ -105,7 +105,7 @@ export class GeminiAccountPool {
 				})
 				return {
 					credentials,
-					projectId,
+					projectId: projectId ? projectId.trim() : null,
 					authClient,
 					filePath,
 					successes: 0.1,
@@ -369,7 +369,7 @@ export class GeminiAccountPool {
 			const loadResponse = await this.callEndpoint(account, "loadCodeAssist", loadRequest, true)
 
 			if (loadResponse.cloudaicompanionProject) {
-				const discoveredId = loadResponse.cloudaicompanionProject
+				const discoveredId = loadResponse.cloudaicompanionProject.trim()
 				account.projectId = discoveredId
 				await this.saveAccountCredentials(account)
 				return discoveredId
@@ -401,7 +401,7 @@ export class GeminiAccountPool {
 				throw new Error("Onboarding timed out.")
 			}
 
-			const discoveredProjectId = lroResponse.response?.cloudaicompanionProject?.id || initialProjectId
+			const discoveredProjectId = lroResponse.response?.cloudaicompanionProject?.id?.trim() || initialProjectId
 			account.projectId = discoveredProjectId
 			await this.saveAccountCredentials(account)
 			return discoveredProjectId
