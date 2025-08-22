@@ -114,11 +114,15 @@
 
 1.  **(可选) 配置环境**:
 
-    - 在项目根目录创建一个 `.env` 文件来自定义端口或设置 HTTP 代理。
-        ```env
-        # .env (可选)
-        PORT=8080
-        # PROXY=http://127.0.0.1:7890
+    - 在项目根目录的 `docker-compose.yml` 文件中直接修改端口和IP。
+        ```yaml
+        # docker-compose.yml
+        services:
+          gemini-gateway:
+            ...
+            ports:
+              - "YOUR_PUBLIC_IP:8888:3000" # 将 YOUR_PUBLIC_IP 替换为您的公网IP, 8888 替换为您的目标端口
+            ...
         ```
 
 2.  **启动服务**:
@@ -131,13 +135,13 @@
 
 您的 Gemini 网关现在已上线！
 
-- **API 端点**: `http://<YOUR_SERVER_IP>:3000/v1/chat/completions` (或您的自定义端口)
+- **API 端点**: `http://<YOUR_PUBLIC_IP>:8888/v1/chat/completions`
 - **API 密钥**: 不需要。您可以使用任何字符串。
 
 **`curl` 示例:**
 
 ```bash
-curl http://localhost:3000/v1/chat/completions \
+curl http://YOUR_PUBLIC_IP:8888/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-anything" \
   -d '{
@@ -154,15 +158,14 @@ curl http://localhost:3000/v1/chat/completions \
 
 ## 4. 配置
 
-服务通过环境变量进行配置。
+核心服务配置现在直接在 `docker-compose.yml` 文件中管理。
 
-| 环境变量              | 描述                                             | `setup` 脚本是否需要 | 默认值    |
-| --------------------- | ------------------------------------------------ | -------------------- | --------- |
-| `PORT`                | 服务器监听的端口。                               | 否                   | `3000`    |
-| `HOST`                | 绑定的主机地址。`0.0.0.0` 监听所有网络接口。     | 否                   | `0.0.0.0` |
-| `PROXY`               | （可选）用于所有出站请求的 HTTP/HTTPS 代理 URL。 | 否                   | `null`    |
-| `OAUTH_CLIENT_ID`     | 您的 Google OAuth 客户端 ID。                    | **是**               | `null`    |
-| `OAUTH_CLIENT_SECRET` | 您的 Google OAuth 客户端密钥。                   | **是**               | `null`    |
+| 配置项                | 描述                                              | `setup` 脚本是否需要 | 默认值/示例                  |
+| --------------------- | ------------------------------------------------- | -------------------- | ---------------------------- |
+| **端口与IP**          | 在 `docker-compose.yml` 的 `ports` 部分直接设置。 | 否                   | `"YOUR_PUBLIC_IP:8888:3000"` |
+| `PROXY`               | （可选）用于所有出站请求的 HTTP/HTTPS 代理 URL。  | 否                   | `null`                       |
+| `OAUTH_CLIENT_ID`     | 您的 Google OAuth 客户端 ID。                     | **是**               | `null`                       |
+| `OAUTH_CLIENT_SECRET` | 您的 Google OAuth 客户端密钥。                    | **是**               | `null`                       |
 
 ## 5. 常见问题 (FAQ)
 
