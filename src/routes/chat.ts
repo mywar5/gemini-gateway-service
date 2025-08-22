@@ -36,7 +36,7 @@ export function registerChatRoutes(server: FastifyInstance) {
 						{
 							contents: geminiMessages,
 						},
-						request.raw.signal,
+						request.signal,
 					)
 					return responseStream as Readable
 				})
