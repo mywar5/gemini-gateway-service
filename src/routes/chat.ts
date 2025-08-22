@@ -31,23 +31,32 @@ export function registerChatRoutes(server: FastifyInstance) {
 				const stream = await server.accountPool.executeRequest(async (callApi, projectId) => {
 					const modelId = body.model.includes("/") ? body.model.split("/").pop() : body.model
 					const url = `projects/${projectId}/models/${modelId}:streamGenerateContent`
-					const responseStream = await callApi(url, {
-						contents: geminiMessages,
-					})
+					const responseStream = await callApi(
+						url,
+						{
+							contents: geminiMessages,
+						},
+						request.raw.signal,
+					)
 					return responseStream as Readable
 				})
 
 				for await (const chunk of stream) {
-					// Assuming the chunk is a buffer that needs to be parsed
 					const rawJson = chunk.toString()
-					// Gemini stream often sends multiple JSON objects, sometimes not perfectly formed.
-					// A robust solution would handle this better.
-					try {
-						const geminiChunk = JSON.parse(rawJson.replace(/^data: /, ""))
-						const openAIChunk = convertToOpenAIStreamChunk(geminiChunk, body.model)
-						reply.raw.write(openAIChunk)
-					} catch (e) {
-						server.log.warn("Could not parse stream chunk:", rawJson)
+					// Handle potential multiple JSON objects in a single chunk
+					const jsonObjects = rawJson.match(/\{[\s\S]*?\}/g)
+					if (jsonObjects) {
+						for (const jsonObj of jsonObjects) {
+							try {
+								const geminiChunk = JSON.parse(jsonObj)
+								const openAIChunk = convertToOpenAIStreamChunk(geminiChunk, body.model)
+								if (!reply.raw.writableEnded) {
+									reply.raw.write(openAIChunk)
+								}
+							} catch (e) {
+								server.log.warn("Could not parse stream chunk:", jsonObj)
+							}
+						}
 					}
 				}
 

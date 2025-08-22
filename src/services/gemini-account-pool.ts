@@ -418,9 +418,11 @@ export class GeminiAccountPool {
 		retryAuth: boolean = true,
 		signal?: AbortSignal,
 	): Promise<any> {
-		const url = urlOrMethod.includes(":")
-			? `${CODE_ASSIST_ENDPOINT}/${urlOrMethod}`
+		// Correctly construct the URL, ensuring the API version is always present.
+		const url = urlOrMethod.startsWith("projects/")
+			? `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}/${urlOrMethod}`
 			: `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${urlOrMethod}`
+
 		// Dynamically set responseType based on whether the call is for a stream
 		const responseType = url.includes(":stream") ? "stream" : "json"
 		// Use the high-performance agent only for non-stream requests due to a bug in gaxios with stream + agent
@@ -433,10 +435,7 @@ export class GeminiAccountPool {
 		)
 
 		try {
-			const requestBody = {
-				...body,
-				project: account.projectId,
-			}
+			// The project ID is part of the URL, so it should not be in the body.
 			const res = await account.authClient.request({
 				url,
 				method: "POST",
@@ -444,7 +443,7 @@ export class GeminiAccountPool {
 					"Content-Type": "application/json",
 				},
 				responseType,
-				data: JSON.stringify(requestBody),
+				data: JSON.stringify(body), // Send the original body
 				signal: signal,
 				agent, // Use the dynamically selected agent
 			})
