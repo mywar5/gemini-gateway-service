@@ -89,8 +89,7 @@ describe("GeminiAccountPool", () => {
 		// Verify that the discovery request was made
 		expect(mockOAuth2ClientInstance.request).toHaveBeenCalledWith(
 			expect.objectContaining({
-				baseURL: "https://cloudcode-pa.googleapis.com",
-				url: "/v1internal:loadCodeAssist",
+				url: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
 			}),
 		)
 	})

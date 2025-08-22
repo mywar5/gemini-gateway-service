@@ -98,11 +98,11 @@ describe("GeminiAccountPool - Google API Interaction", () => {
 		expect(mockRequest).toHaveBeenCalledTimes(1)
 		expect(mockRequest).toHaveBeenCalledWith(
 			expect.objectContaining({
-				baseURL: "https://cloudcode-pa.googleapis.com",
-				url: `/v1internal:${methodName}`,
+				url: `https://cloudcode-pa.googleapis.com/v1internal:${methodName}`,
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				data: requestBody,
+				data: JSON.stringify(requestBody),
+				agent: expect.any(Object),
 			}),
 		)
 	})

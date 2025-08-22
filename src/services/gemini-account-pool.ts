@@ -31,6 +31,8 @@ const OAUTH_REDIRECT_URI = "http://localhost:45289"
 const RATE_LIMIT_QUARANTINE_MS = 30 * 60 * 1000 // 30 minutes
 const GENERAL_FAILURE_QUARANTINE_MS = 5 * 60 * 1000 // 5 minutes
 
+const CODE_ASSIST_ENDPOINT = "https://cloudcode-pa.googleapis.com"
+const CODE_ASSIST_API_VERSION = "v1internal"
 export class GeminiAccountPool {
 	public credentials: Account[] = []
 	private initializationPromise: Promise<void> | null = null
@@ -59,15 +61,8 @@ export class GeminiAccountPool {
 		}
 
 		if (this.proxy) {
-			const proxyUrl = new URL(this.proxy)
-			const proxyOptions = {
-				hostname: proxyUrl.hostname,
-				port: parseInt(proxyUrl.port, 10),
-				protocol: proxyUrl.protocol,
-				auth: proxyUrl.username ? `${proxyUrl.username}:${proxyUrl.password}` : undefined,
-			}
-			chatAgentOptions.proxy = proxyOptions
-			discoveryAgentOptions.proxy = proxyOptions
+			chatAgentOptions.proxy = this.proxy
+			discoveryAgentOptions.proxy = this.proxy
 		}
 
 		this.httpAgent = new HttpsProxyAgent(chatAgentOptions)
@@ -110,15 +105,15 @@ export class GeminiAccountPool {
 					console.error(`[GeminiPool] Incomplete credential file, skipping: ${filePath}`)
 					return null
 				}
-				const authClient = new OAuth2Client({
+				const clientOptions: any = {
 					clientId: OAUTH_CLIENT_ID,
 					clientSecret: OAUTH_CLIENT_SECRET,
 					redirectUri: OAUTH_REDIRECT_URI,
-				})
-				// Manually set the agent for the auth client
-				;(authClient as any).requestOptions = {
-					agent: this.discoveryAgent,
 				}
+				if (this.proxy) {
+					clientOptions.agent = this.discoveryAgent
+				}
+				const authClient = new OAuth2Client(clientOptions)
 				authClient.setCredentials({
 					access_token: credentials.access_token,
 					refresh_token: credentials.refresh_token,
@@ -296,7 +291,7 @@ export class GeminiAccountPool {
 				console.error(`[GeminiPool] Account ${account.filePath} failed. Error: ${error.message}`)
 				account.failures++
 
-				const isRateLimit = error.response?.status === 429
+				const isRateLimit = error.response && error.response.status === 429
 				const jitter = Math.random() * 1000
 				const baseCooldown = isRateLimit ? RATE_LIMIT_QUARANTINE_MS : GENERAL_FAILURE_QUARANTINE_MS
 
@@ -455,21 +450,20 @@ export class GeminiAccountPool {
 	): Promise<any> {
 		try {
 			const res = await account.authClient.request({
-				baseURL: "https://cloudcode-pa.googleapis.com",
-				url: `/v1internal:${method}`,
+				url: `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${method}`,
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
 				},
 				responseType: "json",
-				data: body,
+				data: JSON.stringify(body),
 				signal: signal,
 				// Use the provided agent, or default to the main httpAgent
 				agent: agent || (this.httpAgent as any),
 			})
 			return res.data
 		} catch (error: any) {
-			if (error.response?.status === 401 && retryAuth) {
+			if (error.response && error.response.status === 401 && retryAuth) {
 				console.log(`[GeminiPool] Received 401, attempting token refresh for ${account.filePath}`)
 				await this.ensureAuthenticated(account)
 				// After refreshing, retry the request once without allowing further retries on auth failure.

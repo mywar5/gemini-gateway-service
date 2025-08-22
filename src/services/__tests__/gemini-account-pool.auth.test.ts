@@ -62,15 +62,13 @@ describe("GeminiAccountPool Auth and Proxy", () => {
 		// Check if OAuth2Client was instantiated with the correct options
 		expect(mockedOAuth2Client).toHaveBeenCalledTimes(1)
 
-		// The agent is a complex object, so we check for its presence and key properties
-		const instance = mockedOAuth2Client.mock.results[0].value as any
-		const requestOptions = instance.requestOptions
-		expect(requestOptions).toBeDefined()
-		expect(requestOptions).toHaveProperty("agent")
-		const agent = requestOptions.agent as any
+		// Check if OAuth2Client was instantiated with an agent
+		const constructorOptions = mockedOAuth2Client.mock.calls[0][0]
+		expect(constructorOptions).toBeDefined()
+		const agent = (constructorOptions as any).agent
 		expect(agent).toBeDefined()
 		expect(agent.proxy.hostname).toBe("proxy.example.com")
-		expect(agent.proxy.port).toBe(8080)
+		expect(agent.proxy.port).toBe("8080")
 	})
 
 	it("should use the proxied agent for refreshing tokens", async () => {
