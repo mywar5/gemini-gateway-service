@@ -28,8 +28,10 @@ export function registerChatRoutes(server: FastifyInstance) {
 			try {
 				const geminiMessages = convertToGeminiMessages(body.messages)
 
-				const stream = await server.accountPool.executeRequest(async (callApi) => {
-					const responseStream = await callApi(`models/${body.model}:streamGenerateContent`, {
+				const stream = await server.accountPool.executeRequest(async (callApi, projectId) => {
+					const modelId = body.model.includes("/") ? body.model.split("/").pop() : body.model
+					const url = `projects/${projectId}/models/${modelId}:streamGenerateContent`
+					const responseStream = await callApi(url, {
 						contents: geminiMessages,
 					})
 					return responseStream as Readable
