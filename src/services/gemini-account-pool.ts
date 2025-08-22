@@ -418,9 +418,8 @@ export class GeminiAccountPool {
 		retryAuth: boolean = true,
 		signal?: AbortSignal,
 	): Promise<any> {
-		const isFullPath = urlOrMethod.startsWith("projects/")
-		const url = isFullPath
-			? `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}/${urlOrMethod}`
+		const url = urlOrMethod.includes(":")
+			? `${CODE_ASSIST_ENDPOINT}/${urlOrMethod}`
 			: `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${urlOrMethod}`
 		// Dynamically set responseType based on whether the call is for a stream
 		const responseType = url.includes(":stream") ? "stream" : "json"
