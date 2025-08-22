@@ -422,8 +422,14 @@ export class GeminiAccountPool {
 		const url = isFullUrl ? urlOrMethod : `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${urlOrMethod}`
 		// Dynamically set responseType based on whether the call is for a stream
 		const responseType = url.includes(":stream") ? "stream" : "json"
+		// Use the high-performance agent only for non-stream requests due to a bug in gaxios with stream + agent
+		const agent = responseType === "stream" ? undefined : this.httpAgent
 
-		console.log(`[GeminiPool] Calling API for ${account.filePath}: URL=${url}, ResponseType=${responseType}`)
+		console.log(
+			`[GeminiPool] Calling API for ${account.filePath}: URL=${url}, ResponseType=${responseType}, Agent=${
+				agent ? "hpagent" : "default"
+			}`,
+		)
 
 		try {
 			const res = await account.authClient.request({
@@ -435,11 +441,11 @@ export class GeminiAccountPool {
 				responseType,
 				data: JSON.stringify(body),
 				signal: signal,
-				agent: this.httpAgent,
+				agent, // Use the dynamically selected agent
 			})
 			return res.data
 		} catch (error: any) {
-			console.error(`[GeminiPool] Error calling ${url} for account ${account.filePath}:`, error.message)
+			console.error(`[GeminiPool] Error calling ${url} for account ${account.filePath}:`, error)
 			if (error.response?.status === 401 && retryAuth) {
 				console.log(`[GeminiPool] Received 401, attempting token refresh for ${account.filePath}`)
 				await this.ensureAuthenticated(account)
