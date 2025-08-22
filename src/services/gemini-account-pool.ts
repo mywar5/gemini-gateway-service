@@ -37,39 +37,24 @@ export class GeminiAccountPool {
 	public credentials: Account[] = []
 	private initializationPromise: Promise<void> | null = null
 	public httpAgent: any
-	private discoveryAgent: any // A separate agent for the discovery endpoint
 
 	constructor(
 		private credentialsPath: string,
 		private proxy?: string,
 	) {
-		// High-performance agent for the main chat API
-		const chatAgentOptions: any = {
+		const agentOptions: any = {
 			keepAlive: true,
 			maxSockets: 100,
 			maxFreeSockets: 10,
-			scheduling: "lifo",
-			http2: {
-				enable: true, // Force HTTP/2 for chat endpoint
-			},
-		}
-
-		// A more compatible, standard agent for the discovery API (without HTTP/2)
-		const discoveryAgentOptions: any = {
-			keepAlive: true,
-			maxSockets: 20,
-			maxFreeSockets: 5,
 			scheduling: "lifo",
 		}
 
 		if (this.proxy) {
 			console.log(`[GeminiPool] Using proxy: ${this.proxy}`)
-			chatAgentOptions.proxy = this.proxy
-			discoveryAgentOptions.proxy = this.proxy
+			agentOptions.proxy = this.proxy
 		}
 
-		this.httpAgent = new HttpsProxyAgent(chatAgentOptions)
-		this.discoveryAgent = new HttpsProxyAgent(discoveryAgentOptions)
+		this.httpAgent = new HttpsProxyAgent(agentOptions)
 		this.initializationPromise = this.initialize()
 	}
 
@@ -285,7 +270,7 @@ export class GeminiAccountPool {
 				}
 
 				const callApi = (method: string, body: any, apiSignal?: AbortSignal) =>
-					this.callEndpoint(account, method, body, true, apiSignal, this.httpAgent)
+					this.callEndpoint(account, method, body, true, apiSignal)
 
 				const result = await requestExecutor(callApi, account.projectId)
 				account.successes++
@@ -373,14 +358,7 @@ export class GeminiAccountPool {
 				cloudaicompanionProject: initialProjectId,
 				metadata: clientMetadata,
 			}
-			const loadResponse = await this.callEndpoint(
-				account,
-				"loadCodeAssist",
-				loadRequest,
-				true,
-				undefined,
-				this.discoveryAgent,
-			)
+			const loadResponse = await this.callEndpoint(account, "loadCodeAssist", loadRequest, true)
 
 			if (loadResponse.cloudaicompanionProject) {
 				const discoveredId = loadResponse.cloudaicompanionProject
@@ -396,14 +374,7 @@ export class GeminiAccountPool {
 				cloudaicompanionProject: initialProjectId,
 				metadata: clientMetadata,
 			}
-			let lroResponse = await this.callEndpoint(
-				account,
-				"onboardUser",
-				onboardRequest,
-				true,
-				undefined,
-				this.discoveryAgent,
-			)
+			let lroResponse = await this.callEndpoint(account, "onboardUser", onboardRequest, true)
 
 			const MAX_RETRIES = 10
 			let retryCount = 0
@@ -413,14 +384,7 @@ export class GeminiAccountPool {
 			while (!lroResponse.done && retryCount < MAX_RETRIES) {
 				const jitter = Math.random() * 500
 				await new Promise((resolve) => setTimeout(resolve, backoff + jitter))
-				lroResponse = await this.callEndpoint(
-					account,
-					"onboardUser",
-					onboardRequest,
-					true,
-					undefined,
-					this.discoveryAgent,
-				)
+				lroResponse = await this.callEndpoint(account, "onboardUser", onboardRequest, true)
 				backoff = Math.min(MAX_BACKOFF, backoff * 2)
 				retryCount++
 			}
@@ -445,27 +409,25 @@ export class GeminiAccountPool {
 		body: any,
 		retryAuth: boolean = true,
 		signal?: AbortSignal,
-		agent?: any, // Allow specifying a different agent
 	): Promise<any> {
 		try {
 			const res = await account.authClient.request({
-				url: `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${method}`,
+				url: `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}/${method}`,
 				method: "POST",
 				headers: {
 					"Content-Type": "application/json",
 				},
 				responseType: "json",
-				data: JSON.stringify(body),
+				body: JSON.stringify(body),
 				signal: signal,
-				agent: agent,
+				agent: this.httpAgent,
 			})
 			return res.data
 		} catch (error: any) {
 			if (error.response && error.response.status === 401 && retryAuth) {
 				console.log(`[GeminiPool] Received 401, attempting token refresh for ${account.filePath}`)
 				await this.ensureAuthenticated(account)
-				// After refreshing, retry the request once without allowing further retries on auth failure.
-				return this.callEndpoint(account, method, body, false, signal, agent)
+				return this.callEndpoint(account, method, body, false, signal)
 			}
 			console.error(`[GeminiPool] Error calling ${method} for account ${account.filePath}:`, error.message)
 			throw error
@@ -476,10 +438,6 @@ export class GeminiAccountPool {
 		if (this.httpAgent) {
 			this.httpAgent.destroy()
 			console.log("[GeminiPool] HttpsProxyAgent destroyed.")
-		}
-		if (this.discoveryAgent) {
-			this.discoveryAgent.destroy()
-			console.log("[GeminiPool] HttpsProxyAgent (discovery) destroyed.")
 		}
 	}
 }
