@@ -1,7 +1,8 @@
 import { OAuth2Client } from "google-auth-library"
 import * as fs from "fs/promises"
 import * as path from "path"
-import { HttpsProxyAgent } from "hpagent"
+// eslint-disable-next-line @typescript-eslint/no-var-requires
+const { HttpsProxyAgent } = require("hpagent")
 
 // Interfaces
 interface OAuthCredentials {
@@ -283,7 +284,7 @@ export class GeminiAccountPool {
 				account.successes++
 				return result
 			} catch (error: any) {
-				console.error(`[GeminiPool] Account ${account.filePath} failed. Error: ${error.message}`)
+				console.error(`[GeminiPool] Account ${account.filePath} failed. Error:`, error)
 				account.failures++
 
 				const isRateLimit = error.response && error.response.status === 429
