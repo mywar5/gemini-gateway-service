@@ -418,10 +418,16 @@ export class GeminiAccountPool {
 		retryAuth: boolean = true,
 		signal?: AbortSignal,
 	): Promise<any> {
-		// Correctly construct the URL, ensuring the API version is always present.
-		const url = urlOrMethod.startsWith("projects/")
-			? `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}/${urlOrMethod}`
-			: `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${urlOrMethod}`
+		let url: string
+		if (urlOrMethod.startsWith("projects/")) {
+			// This is a generative model call, use the Vertex AI endpoint.
+			const vertexAiEndpoint = "https://aiplatform.googleapis.com"
+			const vertexApiVersion = "v1"
+			url = `${vertexAiEndpoint}/${vertexApiVersion}/${urlOrMethod}`
+		} else {
+			// This is a Code Assist call for project discovery.
+			url = `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${urlOrMethod}`
+		}
 
 		// Dynamically set responseType based on whether the call is for a stream
 		const responseType = url.includes(":stream") ? "stream" : "json"
