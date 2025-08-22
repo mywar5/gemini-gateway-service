@@ -432,6 +432,10 @@ export class GeminiAccountPool {
 		)
 
 		try {
+			const requestBody = {
+				...body,
+				project: account.projectId,
+			}
 			const res = await account.authClient.request({
 				url,
 				method: "POST",
@@ -439,7 +443,7 @@ export class GeminiAccountPool {
 					"Content-Type": "application/json",
 				},
 				responseType,
-				data: JSON.stringify(body),
+				data: JSON.stringify(requestBody),
 				signal: signal,
 				agent, // Use the dynamically selected agent
 			})
