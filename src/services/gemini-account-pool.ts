@@ -420,10 +420,19 @@ export class GeminiAccountPool {
 	): Promise<any> {
 		let url: string
 		if (urlOrMethod.startsWith("projects/")) {
-			// This is a generative model call, use the Vertex AI endpoint.
-			const vertexAiEndpoint = "https://aiplatform.googleapis.com"
+			// This is a generative model call, use the Vertex AI endpoint, which requires a location.
+			const location = "us-central1" // A common default for Gemini models.
+			const vertexAiEndpoint = `https://${location}-aiplatform.googleapis.com`
 			const vertexApiVersion = "v1"
-			url = `${vertexAiEndpoint}/${vertexApiVersion}/${urlOrMethod}`
+
+			// Deconstruct the incoming partial path: `projects/{projectId}/models/{modelId}:streamGenerateContent`
+			const [projectAndModelsPath, methodName] = urlOrMethod.split(":")
+			const pathParts = projectAndModelsPath.split("/") // ["projects", "{projectId}", "models", "{modelId}"]
+			const projectId = pathParts[1]
+			const modelId = pathParts[3]
+
+			// Construct the full, correct URL according to Vertex AI specifications.
+			url = `${vertexAiEndpoint}/${vertexApiVersion}/projects/${projectId}/locations/${location}/publishers/google/models/${modelId}:${methodName}`
 		} else {
 			// This is a Code Assist call for project discovery.
 			url = `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${urlOrMethod}`
