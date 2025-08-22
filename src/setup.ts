@@ -76,7 +76,10 @@ export class AuthManager {
 
 			const authUrl = oAuth2Client.generateAuthUrl({
 				access_type: "offline",
-				scope: ["https://www.googleapis.com/auth/cloud-platform"],
+				scope: [
+					"https://www.googleapis.com/auth/cloud-platform",
+					"https://www.googleapis.com/auth/generative-language",
+				],
 				prompt: "consent",
 			})
 
