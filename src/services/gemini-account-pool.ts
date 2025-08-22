@@ -220,7 +220,13 @@ export class GeminiAccountPool {
 		}
 
 		if (bestAccount) {
-			console.log(`[GeminiPool] Selected account ${bestAccount.filePath} with score ${maxScore.toFixed(4)}`)
+			console.log(
+				`[GeminiPool] Selected account ${bestAccount.filePath} with score ${maxScore.toFixed(
+					4,
+				)} (successes: ${bestAccount.successes.toFixed(2)}, failures: ${bestAccount.failures.toFixed(2)})`,
+			)
+		} else {
+			console.warn("[GeminiPool] Could not select a best account from the available pool.")
 		}
 
 		return bestAccount
@@ -236,9 +242,11 @@ export class GeminiAccountPool {
 		await this.initializationPromise
 
 		const attemptedAccounts = new Set<string>()
+		console.log("[GeminiPool] Executing new request...")
 
 		for (let i = 0; i < this.credentials.length + 1; i++) {
 			if (signal?.aborted) {
+				console.log("[GeminiPool] Request aborted by caller during execution loop.")
 				throw new Error("Request aborted by caller.")
 			}
 
@@ -411,6 +419,10 @@ export class GeminiAccountPool {
 	): Promise<any> {
 		const isFullUrl = urlOrMethod.startsWith("http")
 		const url = isFullUrl ? urlOrMethod : `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${urlOrMethod}`
+		// Dynamically set responseType based on whether the call is for a stream
+		const responseType = url.includes(":stream") ? "stream" : "json"
+
+		console.log(`[GeminiPool] Calling API for ${account.filePath}: URL=${url}, ResponseType=${responseType}`)
 
 		try {
 			const res = await account.authClient.request({
@@ -419,7 +431,7 @@ export class GeminiAccountPool {
 				headers: {
 					"Content-Type": "application/json",
 				},
-				responseType: "json",
+				responseType,
 				data: JSON.stringify(body),
 				signal: signal,
 				agent: this.httpAgent,
