@@ -60,6 +60,7 @@ export class GeminiAccountPool {
 		}
 
 		if (this.proxy) {
+			// FIX: Directly use the proxy string. The 'hpagent' library expects a string URL.
 			chatAgentOptions.proxy = this.proxy
 			discoveryAgentOptions.proxy = this.proxy
 		}
