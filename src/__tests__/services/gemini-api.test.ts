@@ -101,7 +101,7 @@ describe("GeminiAccountPool - Google API Interaction", () => {
 				url: `https://cloudcode-pa.googleapis.com/v1internal:${methodName}`,
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
-				data: requestBody,
+				data: JSON.stringify(requestBody),
 				agent: expect.any(Object),
 			}),
 		)

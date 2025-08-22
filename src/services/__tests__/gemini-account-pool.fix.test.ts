@@ -79,7 +79,7 @@ describe("GeminiAccountPool Project ID Discovery Fix", () => {
 			expect.objectContaining({
 				url: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
 				method: "POST",
-				data: expect.any(Object),
+				data: expect.any(String),
 			}),
 		)
 		// Ensure it also saved the newly discovered project ID

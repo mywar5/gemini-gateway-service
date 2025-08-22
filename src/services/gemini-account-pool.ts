@@ -96,11 +96,7 @@ export class GeminiAccountPool {
 					console.error(`[GeminiPool] Incomplete credential file, skipping: ${filePath}`)
 					return null
 				}
-				const authClient = new OAuth2Client({
-					clientId: OAUTH_CLIENT_ID,
-					clientSecret: OAUTH_CLIENT_SECRET,
-					redirectUri: OAUTH_REDIRECT_URI,
-				})
+				const authClient = new OAuth2Client(OAUTH_CLIENT_ID, OAUTH_CLIENT_SECRET, OAUTH_REDIRECT_URI)
 				authClient.setCredentials({
 					access_token: credentials.access_token,
 					refresh_token: credentials.refresh_token,
@@ -421,18 +417,18 @@ export class GeminiAccountPool {
 					"Content-Type": "application/json",
 				},
 				responseType: "json",
-				data: body,
+				data: JSON.stringify(body),
 				signal: signal,
-				agent: this.httpAgent,
+				agent: this.httpAgent as any,
 			})
 			return res.data
 		} catch (error: any) {
-			if (error.response && error.response.status === 401 && retryAuth) {
+			console.error(`[GeminiPool] Error calling ${method} for account ${account.filePath}:`, error.message)
+			if (error.response?.status === 401 && retryAuth) {
 				console.log(`[GeminiPool] Received 401, attempting token refresh for ${account.filePath}`)
 				await this.ensureAuthenticated(account)
-				return this.callEndpoint(account, method, body, false, signal)
+				return this.callEndpoint(account, method, body, false)
 			}
-			console.error(`[GeminiPool] Error calling ${method} for account ${account.filePath}:`, error.message)
 			throw error
 		}
 	}

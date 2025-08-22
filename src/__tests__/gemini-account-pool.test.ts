@@ -86,7 +86,7 @@ describe("GeminiAccountPool", () => {
 		expect(requestConfig.url).toContain(`:${testMethod}`)
 
 		// Verify the request body is passed in 'data' property
-		expect(requestConfig.data).toEqual(testBody)
+		expect(requestConfig.data).toEqual(JSON.stringify(testBody))
 		expect(requestConfig.body).toBeUndefined()
 
 		// Verify the http2-enabled agent is used
