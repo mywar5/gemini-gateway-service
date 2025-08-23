@@ -28,7 +28,6 @@ export function registerChatRoutes(server: FastifyInstance) {
 			try {
 				const geminiMessages = convertToGeminiMessages(body.messages)
 
-				// Manually create an AbortController to handle client connection closing.
 				const abortController = new AbortController()
 				request.raw.on("close", () => {
 					if (request.raw.aborted) {
@@ -51,7 +50,6 @@ export function registerChatRoutes(server: FastifyInstance) {
 
 				server.log.info("Successfully obtained stream from Gemini API. Starting to process chunks...")
 				let buffer = ""
-				let lastSentIndex = -1
 				let chunkCounter = 0
 
 				for await (const chunk of stream) {
@@ -60,48 +58,46 @@ export function registerChatRoutes(server: FastifyInstance) {
 					server.log.info({ chunk: rawChunk, chunkNumber: chunkCounter }, "Received a raw chunk from stream.")
 					buffer += rawChunk
 
-					try {
-						const geminiChunks = JSON.parse(buffer)
-						if (Array.isArray(geminiChunks)) {
-							server.log.info(
-								{ count: geminiChunks.length },
-								"Successfully parsed buffer into a JSON array.",
-							)
-							for (let i = lastSentIndex + 1; i < geminiChunks.length; i++) {
-								const geminiChunk = geminiChunks[i]
-								const openAIChunk = convertToOpenAIStreamChunk(geminiChunk, body.model)
-								if (openAIChunk && !reply.raw.writableEnded) {
-									server.log.info({ index: i }, "Writing converted OpenAI chunk to response.")
-									reply.raw.write(openAIChunk)
+					// This logic correctly handles a stream of concatenated or fragmented JSON objects.
+					let braceLevel = 0
+					let objectStartIndex = -1
+
+					let i = 0
+					while (i < buffer.length) {
+						if (buffer[i] === "{") {
+							if (braceLevel === 0) {
+								objectStartIndex = i
+							}
+							braceLevel++
+						} else if (buffer[i] === "}") {
+							braceLevel--
+							if (braceLevel === 0 && objectStartIndex !== -1) {
+								const objectStr = buffer.substring(objectStartIndex, i + 1)
+								try {
+									const geminiChunk = JSON.parse(objectStr)
+									const openAIChunk = convertToOpenAIStreamChunk(geminiChunk, body.model)
+									if (openAIChunk && !reply.raw.writableEnded) {
+										server.log.info(
+											{ object: objectStr },
+											"Parsed and writing a complete JSON object.",
+										)
+										reply.raw.write(openAIChunk)
+									}
+									// Reset buffer to the part after the parsed object
+									buffer = buffer.substring(i + 1)
+									// Reset search for the next object
+									i = -1
+									objectStartIndex = -1
+									braceLevel = 0
+								} catch (e) {
+									server.log.warn({ object: objectStr }, "Failed to parse a potential JSON object.")
 								}
-								lastSentIndex = i
 							}
 						}
-					} catch (e) {
-						server.log.trace(
-							{ bufferLength: buffer.length },
-							"Buffer is not a complete JSON array yet. Continuing to buffer.",
-						)
+						i++
 					}
 				}
-
 				server.log.info({ finalChunkCount: chunkCounter }, "Stream processing loop finished.")
-
-				try {
-					const geminiChunks = JSON.parse(buffer)
-					if (Array.isArray(geminiChunks)) {
-						for (let i = lastSentIndex + 1; i < geminiChunks.length; i++) {
-							const geminiChunk = geminiChunks[i]
-							const openAIChunk = convertToOpenAIStreamChunk(geminiChunk, body.model)
-							if (openAIChunk && !reply.raw.writableEnded) {
-								server.log.info({ index: i }, "Writing final converted OpenAI chunk to response.")
-								reply.raw.write(openAIChunk)
-							}
-						}
-					}
-				} catch (e: any) {
-					server.log.error(`Failed to parse the final JSON buffer. Content: "${buffer}"`, e)
-				}
 
 				reply.raw.write(createStreamEndChunk())
 			} catch (error: any) {
