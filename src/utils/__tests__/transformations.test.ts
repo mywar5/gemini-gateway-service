@@ -1,6 +1,7 @@
 import {
 	convertToGeminiMessages,
 	convertToOpenAIStreamChunk,
+	createInitialAssistantChunk,
 	createStreamEndChunk,
 	OpenAIChatMessage,
 } from "../transformations"
@@ -85,6 +86,29 @@ describe("Transformation Utilities", () => {
 	describe("createStreamEndChunk", () => {
 		it("should return the correct [DONE] chunk", () => {
 			expect(createStreamEndChunk()).toBe("data: [DONE]\n\n")
+		})
+	})
+
+	describe("createInitialAssistantChunk", () => {
+		it("should create a valid initial SSE chunk with an assistant role", () => {
+			const model = "gemini-1.5-pro-latest"
+			const sseChunk = createInitialAssistantChunk(model)
+
+			expect(sseChunk.startsWith("data: ")).toBe(true)
+			expect(sseChunk.endsWith("\n\n")).toBe(true)
+
+			const jsonString = sseChunk.replace(/^data: /, "").trim()
+			const data = JSON.parse(jsonString)
+
+			expect(data.object).toBe("chat.completion.chunk")
+			expect(data.model).toBe(model)
+			expect(data.choices).toHaveLength(1)
+
+			const choice = data.choices[0]
+			expect(choice.index).toBe(0)
+			expect(choice.finish_reason).toBeNull()
+			expect(choice.delta.role).toBe("assistant")
+			expect(choice.delta.content).toBe("")
 		})
 	})
 })

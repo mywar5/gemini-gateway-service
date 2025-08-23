@@ -2,16 +2,25 @@ import fastify, { FastifyInstance } from "fastify"
 import { registerChatRoutes } from "../chat"
 import { GeminiAccountPool } from "../../services/gemini-account-pool"
 import { Readable } from "stream"
+import * as transformations from "../../utils/transformations"
 
-// Mock the account pool
+// Mock the account pool and transformations
 jest.mock("../../services/gemini-account-pool")
+jest.mock("../../utils/transformations", () => ({
+	...jest.requireActual("../../utils/transformations"), // Import and retain default behavior
+	createInitialAssistantChunk: jest.fn(), // Mock the specific function
+}))
 
 const mockGeminiAccountPool = GeminiAccountPool as jest.MockedClass<typeof GeminiAccountPool>
+const mockCreateInitialAssistantChunk = transformations.createInitialAssistantChunk as jest.Mock
 
 describe("Chat Routes", () => {
 	let server: FastifyInstance
 
 	beforeEach(() => {
+		// Reset mocks before each test
+		mockCreateInitialAssistantChunk.mockClear()
+
 		server = fastify()
 		const mockPoolInstance: jest.Mocked<GeminiAccountPool> = new (mockGeminiAccountPool as any)("/fake/path")
 
@@ -40,11 +49,15 @@ describe("Chat Routes", () => {
 	})
 
 	it("POST /v1/chat/completions should return a stream for a valid request", async () => {
+		const model = "gemini-1.0-pro"
+		const initialChunkContent = `data: {"id":"chatcmpl-initial","object":"chat.completion.chunk","created":12345,"model":"${model}","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}\n\n`
+		mockCreateInitialAssistantChunk.mockReturnValue(initialChunkContent)
+
 		const response = await server.inject({
 			method: "POST",
 			url: "/v1/chat/completions",
 			payload: {
-				model: "gemini-1.0-pro",
+				model,
 				messages: [{ role: "user", content: "Test" }],
 				stream: true,
 			},
@@ -53,10 +66,12 @@ describe("Chat Routes", () => {
 		expect(response.statusCode).toBe(200)
 		expect(response.headers["content-type"]).toBe("text/event-stream")
 
+		// Verify that the initial chunk function was called and its result is in the body
+		expect(mockCreateInitialAssistantChunk).toHaveBeenCalledWith(model)
+		expect(response.body.startsWith(initialChunkContent)).toBe(true)
+
 		const body = response.body
-		// Check for OpenAI stream format
-		expect(body).toContain('data: {"id":')
-		expect(body).toContain('"object":"chat.completion.chunk"')
+		// Check for OpenAI stream format from the actual stream data
 		expect(body).toContain('"delta":{"content":"Hello"}')
 		expect(body).toContain('"delta":{"content":" World"}')
 		expect(body).toContain("data: [DONE]")

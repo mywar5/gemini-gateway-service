@@ -20,29 +20,12 @@ export interface GeminiContent {
  */
 export function convertToGeminiMessages(messages: OpenAIChatMessage[]): GeminiContent[] {
 	const result: GeminiContent[] = []
-	let systemMessage: string | null = null
-	const otherMessages: OpenAIChatMessage[] = []
-
-	// Separate system messages from the rest
-	for (const msg of messages) {
-		if (msg.role === "system") {
-			// Concatenate multiple system messages
-			systemMessage = systemMessage ? `${systemMessage}\n\n${msg.content}` : msg.content
-		} else if (msg.role === "user" || msg.role === "assistant") {
-			otherMessages.push(msg)
-		}
-	}
+	const otherMessages = messages.filter((msg) => msg.role === "user" || msg.role === "assistant")
 
 	// Process user and assistant messages
-	for (let i = 0; i < otherMessages.length; i++) {
-		const msg = otherMessages[i]
+	for (const msg of otherMessages) {
 		const role = msg.role === "assistant" ? "model" : "user"
-		let content = msg.content
-
-		// Prepend system message to the first user message
-		if (i === 0 && role === "user" && systemMessage) {
-			content = `${systemMessage}\n\n${content}`
-		}
+		const content = msg.content
 
 		// Merge consecutive messages from the same role
 		if (result.length > 0 && result[result.length - 1].role === role) {
@@ -106,6 +89,33 @@ export function convertToOpenAIStreamChunk(
 		sseChunk: `data: ${JSON.stringify(streamChunk)}\n\n`,
 		fullText,
 	}
+}
+
+/**
+ * Creates the final "done" chunk for an OpenAI stream.
+ * @returns A string indicating the end of the stream.
+ */
+export function createInitialAssistantChunk(model: string): string {
+	const timestamp = Math.floor(Date.now() / 1000)
+	const id = `chatcmpl-${Buffer.from(Math.random().toString()).toString("base64").substring(0, 29)}`
+
+	const initialChunk = {
+		id,
+		object: "chat.completion.chunk",
+		created: timestamp,
+		model,
+		choices: [
+			{
+				index: 0,
+				delta: {
+					role: "assistant",
+					content: "",
+				},
+				finish_reason: null,
+			},
+		],
+	}
+	return `data: ${JSON.stringify(initialChunk)}\n\n`
 }
 
 /**

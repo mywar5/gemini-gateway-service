@@ -1,6 +1,11 @@
 import { FastifyInstance, FastifyRequest, FastifyReply } from "fastify"
 import { Readable } from "stream"
-import { convertToGeminiMessages, convertToOpenAIStreamChunk, createStreamEndChunk } from "../utils/transformations"
+import {
+	convertToGeminiMessages,
+	convertToOpenAIStreamChunk,
+	createInitialAssistantChunk,
+	createStreamEndChunk,
+} from "../utils/transformations"
 
 // Define the expected request body structure
 interface ChatCompletionRequestBody {
@@ -26,6 +31,10 @@ export function registerChatRoutes(server: FastifyInstance) {
 			})
 
 			try {
+				// Send the initial assistant role chunk to establish the stream
+				const initialChunk = createInitialAssistantChunk(body.model)
+				reply.raw.write(initialChunk)
+
 				const geminiMessages = convertToGeminiMessages(body.messages)
 
 				const abortController = new AbortController()
