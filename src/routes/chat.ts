@@ -38,57 +38,55 @@ export function registerChatRoutes(server: FastifyInstance) {
 				})
 
 				const stream = await server.accountPool.executeRequest(async (callApi, projectId) => {
-					// The model ID is now part of the request body, not the URL.
 					const modelId = body.model.includes("/") ? body.model.split("/").pop() : body.model
 					const requestBody = {
 						model: modelId,
 						project: projectId,
-						request: {
-							contents: geminiMessages,
-						},
+						request: { contents: geminiMessages },
 					}
-					const responseStream = await callApi(
-						"streamGenerateContent", // Pass the method name directly
-						requestBody,
-						abortController.signal,
-					)
+					server.log.info({ requestBody }, "Sending request to Gemini stream API")
+					const responseStream = await callApi("streamGenerateContent", requestBody, abortController.signal)
 					return responseStream as Readable
 				})
 
+				server.log.info("Successfully obtained stream from Gemini API. Starting to process chunks...")
 				let buffer = ""
-				let lastSentIndex = -1 // Keep track of the last processed object in the array
+				let lastSentIndex = -1
+				let chunkCounter = 0
 
 				for await (const chunk of stream) {
-					buffer += chunk.toString()
+					chunkCounter++
+					const rawChunk = chunk.toString()
+					server.log.info({ chunk: rawChunk, chunkNumber: chunkCounter }, "Received a raw chunk from stream.")
+					buffer += rawChunk
 
-					// The API returns a single JSON array that gets chunked.
-					// We need to buffer until we can parse a valid array structure.
 					try {
-						// Attempt to parse the entire buffer as a JSON array
 						const geminiChunks = JSON.parse(buffer)
-
 						if (Array.isArray(geminiChunks)) {
-							// Process only new chunks that haven't been sent yet
+							server.log.info(
+								{ count: geminiChunks.length },
+								"Successfully parsed buffer into a JSON array.",
+							)
 							for (let i = lastSentIndex + 1; i < geminiChunks.length; i++) {
 								const geminiChunk = geminiChunks[i]
 								const openAIChunk = convertToOpenAIStreamChunk(geminiChunk, body.model)
 								if (openAIChunk && !reply.raw.writableEnded) {
+									server.log.info({ index: i }, "Writing converted OpenAI chunk to response.")
 									reply.raw.write(openAIChunk)
 								}
-								lastSentIndex = i // Update the index of the last sent chunk
+								lastSentIndex = i
 							}
 						}
 					} catch (e) {
-						// This is expected if the JSON is not yet complete.
-						// We simply continue to buffer more data.
-						// To avoid spamming logs, we can add a more sophisticated check later if needed.
-						server.log.trace("Buffer does not contain a complete JSON array yet. Buffering more data.")
+						server.log.trace(
+							{ bufferLength: buffer.length },
+							"Buffer is not a complete JSON array yet. Continuing to buffer.",
+						)
 					}
 				}
 
-				// After the stream ends, there might be remaining, valid JSON in the buffer
-				// that was complete but didn't trigger the try-catch block one last time.
-				// This is a fallback to ensure the last piece of data is processed.
+				server.log.info({ finalChunkCount: chunkCounter }, "Stream processing loop finished.")
+
 				try {
 					const geminiChunks = JSON.parse(buffer)
 					if (Array.isArray(geminiChunks)) {
@@ -96,6 +94,7 @@ export function registerChatRoutes(server: FastifyInstance) {
 							const geminiChunk = geminiChunks[i]
 							const openAIChunk = convertToOpenAIStreamChunk(geminiChunk, body.model)
 							if (openAIChunk && !reply.raw.writableEnded) {
+								server.log.info({ index: i }, "Writing final converted OpenAI chunk to response.")
 								reply.raw.write(openAIChunk)
 							}
 						}
@@ -116,6 +115,7 @@ export function registerChatRoutes(server: FastifyInstance) {
 				}
 			} finally {
 				if (!reply.raw.writableEnded) {
+					server.log.info("Ending the response stream.")
 					reply.raw.end()
 				}
 			}
