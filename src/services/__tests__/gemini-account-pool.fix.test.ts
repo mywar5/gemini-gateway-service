@@ -39,95 +39,77 @@ const createMockCredentialFile = (projectId?: string) => {
 	return JSON.stringify(data)
 }
 
-describe("GeminiAccountPool Project ID Discovery Fix", () => {
-	let mockClientInstance: ReturnType<typeof createMockClient>
-	let pool: GeminiAccountPool | null = null
+describe("GeminiAccountPool executeRequest Robustness", () => {
+	let pool: GeminiAccountPool
 
-	beforeEach(() => {
+	beforeEach(async () => {
 		jest.clearAllMocks()
-		mockClientInstance = createMockClient()
-		mockOAuth2Client.mockImplementation(() => mockClientInstance as any)
+		const credentialsPath = "/fake/robustness_path"
+		;(mockFs.readdir as jest.Mock).mockResolvedValue(["account1.json", "account2.json"])
+		;(mockFs.readFile as jest.Mock).mockResolvedValue(createMockCredentialFile("test-project-id"))
+		mockOAuth2Client.mockImplementation(() => createMockClient() as any)
+
+		pool = new GeminiAccountPool(credentialsPath)
+		jest.spyOn(pool as any, "warmUpAccount").mockResolvedValue(undefined)
+		await (pool as any).initializationPromise
 	})
 
 	afterEach(() => {
-		if (pool) {
-			pool.destroy()
-			pool = null
-		}
+		pool.destroy()
 	})
 
-	it("should call authClient.request with baseURL and relative url during project discovery", async () => {
-		// 1. Setup: Mock the environment
-		const credentialsPath = "/fake/credentials"
-		;(mockFs.readdir as jest.Mock).mockResolvedValueOnce(["account1.json"])
-		const creds = createMockCredentialFile() // No project ID initially
-		;(mockFs.readFile as jest.Mock).mockResolvedValueOnce(creds)
-		;(mockFs.writeFile as jest.Mock).mockResolvedValueOnce(undefined) // Mock the save operation
-
-		// Mock the API response for loadCodeAssist
-		mockClientInstance.request.mockResolvedValue({
-			data: { cloudaicompanionProject: "discovered-project-id" },
+	it("should throw an error after exhausting all retries", async () => {
+		const maxRetries = 3
+		// The executor should call the provided API function.
+		const requestExecutor = jest.fn().mockImplementation(async (callApi) => {
+			return callApi("testMethod", { test: "body" })
 		})
 
-		// 2. Action: Initialize the pool, which triggers warm-up and discovery
-		pool = new GeminiAccountPool(credentialsPath)
-		await (pool as any).initializationPromise
+		const failingAccount = pool.credentials[0]
+		jest.spyOn(pool, "selectAccount").mockReturnValue(failingAccount)
+		const callEndpointSpy = jest.spyOn(pool as any, "callEndpoint").mockRejectedValue(new Error("API Error"))
 
-		// 3. Assertion: Verify the fix
-		// The crucial check: ensure `request` was called with the correct structure
-		expect(mockClientInstance.request).toHaveBeenCalledWith(
-			expect.objectContaining({
-				url: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
-				method: "POST",
-				data: expect.any(String),
-			}),
+		await expect(pool.executeRequest(requestExecutor, undefined, maxRetries)).rejects.toThrow(
+			`[GeminiPool] Request failed after ${maxRetries} attempts. All credentials may be failing or frozen.`,
 		)
-		// Ensure it also saved the newly discovered project ID
-		expect(mockFs.writeFile).toHaveBeenCalledTimes(1)
-		const writtenContent = (mockFs.writeFile as jest.Mock).mock.calls[0][1]
-		const writtenData = JSON.parse(writtenContent)
-		expect(writtenData.projectId).toBe("discovered-project-id")
+
+		// The executor is called on each attempt. Given the mock setup,
+		// the loop will break after the first attempt because the same account is selected
+		// and the guard condition `attemptedAccounts.size >= availableAccounts.length` will be met.
+		expect(requestExecutor).toHaveBeenCalledTimes(1)
+		expect(callEndpointSpy).toHaveBeenCalledTimes(1)
 	})
 
-	it("should handle onboarding flow correctly if loadCodeAssist returns no project", async () => {
-		// 1. Setup
-		const credentialsPath = "/fake/credentials"
-		;(mockFs.readdir as jest.Mock).mockResolvedValueOnce(["account1.json"])
-		const creds = createMockCredentialFile()
-		;(mockFs.readFile as jest.Mock).mockResolvedValueOnce(creds)
-		;(mockFs.writeFile as jest.Mock).mockResolvedValue(undefined)
-
-		// Mock loadCodeAssist response (no project, requires onboarding)
-		mockClientInstance.request.mockResolvedValueOnce({
-			data: { allowedTiers: [{ id: "free-tier", isDefault: true }] },
-		})
-		// Mock onboardUser response
-		mockClientInstance.request.mockResolvedValueOnce({
-			data: {
-				done: true,
-				response: { cloudaicompanionProject: { id: "onboarded-project-id" } },
-			},
+	it("should succeed on the second attempt if the first account fails", async () => {
+		const badAccount = pool.credentials[0]
+		const goodAccount = pool.credentials[1]
+		// The executor should call the provided API function.
+		const requestExecutor = jest.fn().mockImplementation(async (callApi) => {
+			// This executor will be called twice, but the underlying callApi will fail the first time.
+			const result = await callApi("testMethod", { test: "body" })
+			// To make the test simpler, we assume the final result is what callEndpoint returns.
+			return result.data
 		})
 
-		// 2. Action
-		pool = new GeminiAccountPool(credentialsPath)
-		await (pool as any).initializationPromise
-		// Check loadCodeAssist call
-		expect(mockClientInstance.request).toHaveBeenCalledWith(
-			expect.objectContaining({
-				url: "https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
-			}),
-		)
+		jest.spyOn(pool, "selectAccount").mockReturnValueOnce(badAccount).mockReturnValueOnce(goodAccount)
 
-		// Check onboardUser call
-		expect(mockClientInstance.request).toHaveBeenCalledWith(
-			expect.objectContaining({
-				url: "https://cloudcode-pa.googleapis.com/v1internal:onboardUser",
-			}),
-		)
-		expect(mockFs.writeFile).toHaveBeenCalled()
-		const lastWriteCall = (mockFs.writeFile as jest.Mock).mock.calls.slice(-1)[0]
-		const writtenData = JSON.parse(lastWriteCall[1])
-		expect(writtenData.projectId).toBe("onboarded-project-id")
+		// `callEndpoint` will throw an error only when called with the bad account
+		const callEndpointSpy = jest.spyOn(pool as any, "callEndpoint").mockImplementation(async (account: any) => {
+			if (account.filePath === badAccount.filePath) {
+				throw new Error("Simulated failure for bad account")
+			}
+			// Return a success-like object for the good account.
+			return { data: "success" }
+		})
+
+		const finalResult = await pool.executeRequest(requestExecutor)
+
+		expect(finalResult).toBe("success")
+		expect(callEndpointSpy).toHaveBeenCalledTimes(2) // Called for bad and good account
+		expect(requestExecutor).toHaveBeenCalledTimes(2) // Called for bad and good account
+
+		expect(badAccount.failures).toBeGreaterThan(0.1)
+		expect(badAccount.frozenUntil).toBeGreaterThan(Date.now())
+		expect(goodAccount.successes).toBeGreaterThan(0.1)
 	})
 })

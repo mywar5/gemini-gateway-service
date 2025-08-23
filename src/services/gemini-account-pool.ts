@@ -59,7 +59,14 @@ export class GeminiAccountPool {
 		}
 
 		this.httpAgent = new HttpsProxyAgent(agentOptions)
-		this.initializationPromise = this.initialize()
+		this.init()
+	}
+
+	public async init(): Promise<void> {
+		if (!this.initializationPromise) {
+			this.initializationPromise = this.initialize()
+		}
+		return this.initializationPromise
 	}
 
 	private async initialize(): Promise<void> {
@@ -239,25 +246,32 @@ export class GeminiAccountPool {
 			projectId: string,
 		) => Promise<T>,
 		signal?: AbortSignal,
+		maxRetries: number = 5, // Add maxRetries parameter with a default value
 	): Promise<T> {
 		await this.initializationPromise
 
 		const attemptedAccounts = new Set<string>()
-		console.log("[GeminiPool] Executing new request...")
+		console.log(`[GeminiPool] Executing new request with max ${maxRetries} retries...`)
 
-		for (let i = 0; i < this.credentials.length + 1; i++) {
+		for (let attempt = 0; attempt < maxRetries; attempt++) {
 			if (signal?.aborted) {
-				console.log("[GeminiPool] Request aborted by caller during execution loop.")
+				console.log(`[GeminiPool] Request aborted by caller on attempt ${attempt + 1}.`)
 				throw new Error("Request aborted by caller.")
 			}
 
 			const account = this.selectAccount()
 			if (!account) {
-				break
+				console.warn(`[GeminiPool] No available accounts to select on attempt ${attempt + 1}.`)
+				// If no accounts are available, wait a bit before the next attempt.
+				await new Promise((resolve) => setTimeout(resolve, 1000))
+				continue
 			}
 
+			// Skip if we have already tried this account in this request cycle.
 			if (attemptedAccounts.has(account.filePath)) {
-				if (attemptedAccounts.size === this.credentials.filter((acc) => acc.frozenUntil <= Date.now()).length) {
+				// If we've tried all available accounts, break the loop.
+				if (attemptedAccounts.size >= this.credentials.filter((acc) => acc.frozenUntil <= Date.now()).length) {
+					console.warn("[GeminiPool] All available accounts have been attempted. Ending request.")
 					break
 				}
 				continue
@@ -269,7 +283,8 @@ export class GeminiAccountPool {
 				if (!account.isInitialized) {
 					await this.warmUpAccount(account)
 					if (account.frozenUntil > Date.now()) {
-						continue
+						console.warn(`[GeminiPool] Account ${account.filePath} was frozen during warm-up, retrying...`)
+						continue // Retry with a new account immediately.
 					}
 				}
 
@@ -277,33 +292,41 @@ export class GeminiAccountPool {
 					throw new Error(`Account ${account.filePath} could not discover a project ID.`)
 				}
 
-				// The `callApi` function now takes a method name and the full request body.
 				const callApi = (method: string, body: any, apiSignal?: AbortSignal) =>
 					this.callEndpoint(account, method, body, true, apiSignal)
 
 				const result = await requestExecutor(callApi, account.projectId)
 				account.successes++
-				return result
+				return result // Success, exit the loop and return the result.
 			} catch (error: any) {
-				console.error(`[GeminiPool] Account ${account.filePath} failed. Error:`, error)
+				console.error(
+					`[GeminiPool] Attempt ${attempt + 1} failed for account ${account.filePath}. Error:`,
+					error.message,
+				)
 				account.failures++
 
 				const isRateLimit = error.response && error.response.status === 429
 				const jitter = Math.random() * 1000
 				const baseCooldown = isRateLimit ? RATE_LIMIT_QUARANTINE_MS : GENERAL_FAILURE_QUARANTINE_MS
-				const backoffMultiplier = Math.pow(2, Math.min(account.failures - 1, 4))
-				const cooldownDuration = Math.min(baseCooldown * backoffMultiplier, 60 * 60 * 1000) + jitter
+				// Increase backoff for repeated failures, but cap it.
+				const backoffMultiplier = Math.pow(2, Math.min(account.failures, 5))
+				const cooldownDuration =
+					Math.min(baseCooldown * backoffMultiplier, 1.5 * RATE_LIMIT_QUARANTINE_MS) + jitter
 
 				account.frozenUntil = Date.now() + cooldownDuration
 				console.warn(
 					`[GeminiPool] Account ${
 						account.filePath
-					} frozen for ${cooldownDuration / 1000}s due to ${isRateLimit ? "rate limit" : "failure"}.`,
+					} frozen for ${Math.round(cooldownDuration / 1000)}s due to ${
+						isRateLimit ? "rate limit" : "failure"
+					}.`,
 				)
 			}
 		}
 
-		throw new Error("[GeminiPool] All credentials failed or are frozen.")
+		throw new Error(
+			`[GeminiPool] Request failed after ${maxRetries} attempts. All credentials may be failing or frozen.`,
+		)
 	}
 
 	public unfreezeAccount(accountIdentifier: string): boolean {
