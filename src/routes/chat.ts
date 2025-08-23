@@ -55,33 +55,53 @@ export function registerChatRoutes(server: FastifyInstance) {
 					return responseStream as Readable
 				})
 
+				let buffer = ""
 				for await (const chunk of stream) {
-					const rawJson = chunk.toString()
-					// Handle potential multiple JSON objects in a single chunk
-					const jsonObjects = rawJson.match(/\{[\s\S]*?\}/g)
-					if (jsonObjects) {
-						for (const jsonObj of jsonObjects) {
-							try {
-								const geminiChunk = JSON.parse(jsonObj)
-								const openAIChunk = convertToOpenAIStreamChunk(geminiChunk, body.model)
-								if (!reply.raw.writableEnded) {
-									reply.raw.write(openAIChunk)
-								}
-							} catch (e) {
-								server.log.warn("Could not parse stream chunk:", jsonObj)
+					buffer += chunk.toString()
+					const lines = buffer.split("\n")
+					buffer = lines.pop() || "" // Keep the last, possibly incomplete, line in the buffer
+
+					for (const line of lines) {
+						if (line.trim() === "") continue // Skip empty lines
+						try {
+							const geminiChunk = JSON.parse(line)
+							const openAIChunk = convertToOpenAIStreamChunk(geminiChunk, body.model)
+							if (openAIChunk && !reply.raw.writableEnded) {
+								reply.raw.write(openAIChunk)
 							}
+						} catch (e: any) {
+							server.log.warn(`Could not parse stream line as JSON: "${line}"`, e)
 						}
+					}
+				}
+
+				// Process any remaining data in the buffer
+				if (buffer.trim() !== "" && !reply.raw.writableEnded) {
+					try {
+						const geminiChunk = JSON.parse(buffer)
+						const openAIChunk = convertToOpenAIStreamChunk(geminiChunk, body.model)
+						if (openAIChunk) {
+							reply.raw.write(openAIChunk)
+						}
+					} catch (e: any) {
+						server.log.warn(`Could not parse final buffer content as JSON: "${buffer}"`, e)
 					}
 				}
 
 				reply.raw.write(createStreamEndChunk())
 			} catch (error: any) {
 				server.log.error(`Stream error: ${error.message}`)
-				const errorChunk = JSON.stringify({ error: { message: error.message, type: "internal_server_error" } })
-				reply.raw.write(`data: ${errorChunk}\n\n`)
-				reply.raw.write(createStreamEndChunk())
+				if (!reply.raw.writableEnded) {
+					const errorChunk = JSON.stringify({
+						error: { message: error.message, type: "internal_server_error" },
+					})
+					reply.raw.write(`data: ${errorChunk}\n\n`)
+					reply.raw.write(createStreamEndChunk())
+				}
 			} finally {
-				reply.raw.end()
+				if (!reply.raw.writableEnded) {
+					reply.raw.end()
+				}
 			}
 		} else {
 			// Non-streamed response (Not implemented for this example)
