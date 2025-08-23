@@ -1,40 +1,73 @@
 // This file will contain the logic to transform OpenAI-compatible API requests
 // into the format expected by the Google Gemini API, and vice-versa for the responses.
 
-// Placeholder for OpenAI request message format
-export interface OpenAIChatMessage {
-	role: "user" | "assistant" | "system"
-	content: string
+// Defines the structure for a part of a message's content, which can be text or other types.
+export interface OpenAIContentPart {
+	type: "text" | "image_url"
+	text?: string
+	// Other fields like image_url can be added here but are ignored by the transformation.
 }
 
-// Placeholder for Gemini request content format
+// Defines the possible structures for the content of an OpenAI message.
+export type OpenAIMessageContent = string | OpenAIContentPart[]
+
+// Defines the structure for a single message in an OpenAI-compatible request.
+export interface OpenAIChatMessage {
+	role: "user" | "assistant" | "system"
+	content: OpenAIMessageContent
+}
+
+// Defines the structure for a Gemini-formatted message part.
 export interface GeminiContent {
 	role: "user" | "model"
 	parts: { text: string }[]
 }
 
 /**
+ * Extracts and concatenates text from the complex content of an OpenAI message.
+ * @param content The content of an OpenAI message.
+ * @returns A single string with all text parts concatenated.
+ */
+function getTextFromContent(content: OpenAIMessageContent): string {
+	if (typeof content === "string") {
+		return content
+	}
+	if (Array.isArray(content)) {
+		return content
+			.filter((part) => part.type === "text" && typeof part.text === "string")
+			.map((part) => part.text)
+			.join("\n")
+	}
+	return ""
+}
+
+/**
  * Converts an array of OpenAI-formatted messages to Gemini-formatted content.
+ * This version correctly handles complex content types and merges consecutive messages.
  * @param messages The array of OpenAI messages.
  * @returns The array of Gemini content.
  */
 export function convertToGeminiMessages(messages: OpenAIChatMessage[]): GeminiContent[] {
 	const result: GeminiContent[] = []
-	const otherMessages = messages.filter((msg) => msg.role === "user" || msg.role === "assistant")
+	// Filter out system messages and process only user and assistant roles.
+	const filteredMessages = messages.filter((msg) => msg.role === "user" || msg.role === "assistant")
 
-	// Process user and assistant messages
-	for (const msg of otherMessages) {
+	for (const msg of filteredMessages) {
 		const role = msg.role === "assistant" ? "model" : "user"
-		const content = msg.content
+		const textContent = getTextFromContent(msg.content)
 
-		// Merge consecutive messages from the same role
+		if (!textContent) {
+			continue // Skip messages with no text content.
+		}
+
+		// If the last message in the result has the same role, merge the content.
 		if (result.length > 0 && result[result.length - 1].role === role) {
-			const lastPart = result[result.length - 1].parts[0]
-			lastPart.text = lastPart.text ? `${lastPart.text}\n\n${content}` : content
+			result[result.length - 1].parts[0].text += `\n\n${textContent}`
 		} else {
+			// Otherwise, push a new message object.
 			result.push({
 				role,
-				parts: [{ text: content }],
+				parts: [{ text: textContent }],
 			})
 		}
 	}

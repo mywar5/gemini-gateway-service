@@ -5,11 +5,12 @@ import {
 	convertToOpenAIStreamChunk,
 	createInitialAssistantChunk,
 	createStreamEndChunk,
+	OpenAIChatMessage,
 } from "../utils/transformations"
 
-// Define the expected request body structure
+// Define the expected request body structure, aligning with the transformation logic
 interface ChatCompletionRequestBody {
-	messages: { role: "user" | "assistant" | "system"; content: string }[]
+	messages: OpenAIChatMessage[]
 	model: string
 	stream?: boolean
 }
@@ -58,59 +59,79 @@ export function registerChatRoutes(server: FastifyInstance) {
 				})
 
 				server.log.info("Successfully obtained stream from Gemini API. Starting to process chunks...")
+
 				let buffer = ""
+				let lastSentText = ""
 				let chunkCounter = 0
-				let lastSentText = "" // State to track the last sent text
+				let braceLevel = 0
+				let inJsonArray = false
+
+				const processBuffer = () => {
+					// This function processes the buffer to find and parse complete JSON objects from the stream.
+					while (true) {
+						if (!inJsonArray) {
+							const arrayStartIndex = buffer.indexOf("[")
+							if (arrayStartIndex !== -1) {
+								buffer = buffer.substring(arrayStartIndex + 1)
+								inJsonArray = true
+							} else {
+								// If no array start is found and buffer is not empty, it's likely malformed data.
+								if (buffer.length > 0) buffer = ""
+								break
+							}
+						}
+
+						const objectStartIndex = buffer.indexOf("{")
+						if (objectStartIndex === -1) {
+							break // No start of a new object, wait for more data.
+						}
+
+						// Scan for the matching closing brace.
+						let i = objectStartIndex
+						braceLevel = 0
+						let foundObject = false
+						for (; i < buffer.length; i++) {
+							if (buffer[i] === "{") {
+								braceLevel++
+							} else if (buffer[i] === "}") {
+								braceLevel--
+								if (braceLevel === 0) {
+									const objectStr = buffer.substring(objectStartIndex, i + 1)
+									try {
+										const geminiChunk = JSON.parse(objectStr)
+										// Ensure we pass the inner 'response' object if it exists.
+										const contentChunk = geminiChunk.response || geminiChunk
+										const result = convertToOpenAIStreamChunk(contentChunk, body.model, lastSentText)
+
+										if (result && result.sseChunk && !reply.raw.writableEnded) {
+											reply.raw.write(result.sseChunk)
+											lastSentText = result.fullText
+										}
+									} catch (e) {
+										server.log.warn({ object: objectStr, error: e }, "Failed to parse a JSON object from stream.")
+									}
+									buffer = buffer.substring(i + 1)
+									foundObject = true
+									break // Restart the while loop to process the rest of the buffer.
+								}
+							}
+						}
+
+						if (!foundObject) {
+							break // Incomplete object in buffer, wait for more data.
+						}
+					}
+				}
 
 				for await (const chunk of stream) {
 					chunkCounter++
 					const rawChunk = chunk.toString()
 					server.log.info({ chunk: rawChunk, chunkNumber: chunkCounter }, "Received a raw chunk from stream.")
 					buffer += rawChunk
-
-					// This logic correctly handles a stream of concatenated or fragmented JSON objects.
-					let braceLevel = 0
-					let objectStartIndex = -1
-
-					let i = 0
-					while (i < buffer.length) {
-						if (buffer[i] === "{") {
-							if (braceLevel === 0) {
-								objectStartIndex = i
-							}
-							braceLevel++
-						} else if (buffer[i] === "}") {
-							braceLevel--
-							if (braceLevel === 0 && objectStartIndex !== -1) {
-								const objectStr = buffer.substring(objectStartIndex, i + 1)
-								try {
-									const geminiChunk = JSON.parse(objectStr)
-									const result = convertToOpenAIStreamChunk(geminiChunk, body.model, lastSentText)
-
-									if (result && result.sseChunk && !reply.raw.writableEnded) {
-										server.log.info(
-											{ object: objectStr, delta: result.sseChunk },
-											"Parsed and writing a delta chunk.",
-										)
-										reply.raw.write(result.sseChunk)
-										lastSentText = result.fullText // Update the state
-									}
-									// Reset buffer to the part after the parsed object
-									buffer = buffer.substring(i + 1)
-									// Reset search for the next object
-									i = -1
-									objectStartIndex = -1
-									braceLevel = 0
-								} catch (e) {
-									server.log.warn({ object: objectStr }, "Failed to parse a potential JSON object.")
-								}
-							}
-						}
-						i++
-					}
+					processBuffer()
 				}
-				server.log.info({ finalChunkCount: chunkCounter }, "Stream processing loop finished.")
 
+				server.log.info({ finalChunkCount: chunkCounter }, "Stream processing loop finished.")
 				reply.raw.write(createStreamEndChunk())
 			} catch (error: any) {
 				server.log.error(`Stream error: ${error.message}`)

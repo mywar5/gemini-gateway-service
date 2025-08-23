@@ -32,6 +32,42 @@ describe("Transformation Utilities", () => {
 		it("should handle an empty array", () => {
 			expect(convertToGeminiMessages([])).toEqual([])
 		})
+
+		it("should correctly handle complex content arrays and merge consecutive roles", () => {
+			const openAIMessages: OpenAIChatMessage[] = [
+				{
+					role: "user",
+					content: [
+						{ type: "text", text: "Hello, this is the first part." },
+						{ type: "image_url" }, // Should be ignored
+					],
+				},
+				{
+					role: "user",
+					content: "This is the second part, as a simple string.",
+				},
+				{
+					role: "assistant",
+					content: "This is an assistant message.",
+				},
+			]
+			const expected = [
+				{
+					role: "user",
+					parts: [{ text: "Hello, this is the first part.\n\nThis is the second part, as a simple string." }],
+				},
+				{ role: "model", parts: [{ text: "This is an assistant message." }] },
+			]
+			expect(convertToGeminiMessages(openAIMessages)).toEqual(expected)
+		})
+
+		it("should return an empty array if all messages are non-text", () => {
+			const openAIMessages: OpenAIChatMessage[] = [
+				{ role: "user", content: [{ type: "image_url" }] },
+				{ role: "assistant", content: "" },
+			]
+			expect(convertToGeminiMessages(openAIMessages)).toEqual([])
+		})
 	})
 
 	describe("convertToOpenAIStreamChunk", () => {

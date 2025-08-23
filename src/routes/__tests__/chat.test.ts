@@ -27,16 +27,23 @@ describe("Chat Routes", () => {
 		// Mock the executeRequest method
 		mockPoolInstance.executeRequest.mockImplementation(async (_executor: any) => {
 			const mockStream = new Readable({ read() {} })
-			// Asynchronously push data to better simulate a real stream
-			setTimeout(() => {
-				mockStream.push('data: {"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}\n\n')
-				setTimeout(() => {
-					mockStream.push('data: {"candidates":[{"content":{"parts":[{"text":" World"}]}}]}\n\n')
-					setTimeout(() => {
-						mockStream.push(null) // End the stream
-					}, 10)
-				}, 10)
-			}, 10)
+			const chunks = [
+				`[{"candidates":[{"content":{"parts":[{"text":"Hello"}]}}]}]`,
+				`,`,
+				`{"candidates":[{"content":{"parts":[{"text":" world"}]}}]}]`,
+				`,`,
+				`{"candidates":[{"content":{"parts":[{"text":"!"}]}}]}]`,
+			]
+
+			// Push all chunks asynchronously in the next tick of the event loop
+			// to ensure the test framework can await the full stream.
+			process.nextTick(() => {
+				for (const chunk of chunks) {
+					mockStream.push(chunk)
+				}
+				mockStream.push(null)
+			})
+
 			return mockStream
 		})
 
@@ -69,14 +76,13 @@ describe("Chat Routes", () => {
 		// Verify that the initial chunk function was called and its result is in the body
 		expect(mockCreateInitialAssistantChunk).toHaveBeenCalledWith(model)
 		expect(response.body.startsWith(initialChunkContent)).toBe(true)
-
 		const body = response.body
 		// Check for OpenAI stream format from the actual stream data
 		expect(body).toContain('"delta":{"content":"Hello"}')
-		expect(body).toContain('"delta":{"content":" World"}')
+		expect(body).toContain('"delta":{"content":" world"}')
+		expect(body).toContain('"delta":{"content":"!"}')
 		expect(body).toContain("data: [DONE]")
 	})
-
 	it("POST /v1/chat/completions should return 400 for a request missing messages", async () => {
 		const response = await server.inject({
 			method: "POST",
