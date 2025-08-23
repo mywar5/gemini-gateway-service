@@ -277,8 +277,9 @@ export class GeminiAccountPool {
 					throw new Error(`Account ${account.filePath} could not discover a project ID.`)
 				}
 
-				const callApi = (urlOrMethod: string, body: any, apiSignal?: AbortSignal) =>
-					this.callEndpoint(account, urlOrMethod, body, true, apiSignal)
+				// The `callApi` function now takes a method name and the full request body.
+				const callApi = (method: string, body: any, apiSignal?: AbortSignal) =>
+					this.callEndpoint(account, method, body, true, apiSignal)
 
 				const result = await requestExecutor(callApi, account.projectId)
 				account.successes++
@@ -413,36 +414,26 @@ export class GeminiAccountPool {
 
 	private async callEndpoint(
 		account: Account,
-		urlOrMethod: string,
+		method: string, // Now it's always a method name like "streamGenerateContent"
 		body: any,
 		retryAuth: boolean = true,
 		signal?: AbortSignal,
 	): Promise<any> {
-		let url: string
-		if (urlOrMethod.startsWith("projects/")) {
-			// This is a generative model call, use the Vertex AI endpoint, which requires a location.
-			const geminiEndpoint = "https://generativelanguage.googleapis.com"
-			const apiVersion = "v1beta"
-			const [_, __, model] = urlOrMethod.split("/")
-			url = `${geminiEndpoint}/${apiVersion}/models/${model}:streamGenerateContent`
-		} else {
-			// This is a Code Assist call for project discovery.
-			url = `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${urlOrMethod}`
-		}
+		// All API calls now go through the Code Assist endpoint.
+		const url = `${CODE_ASSIST_ENDPOINT}/${CODE_ASSIST_API_VERSION}:${method}`
 
 		// Dynamically set responseType based on whether the call is for a stream
-		const responseType = url.includes(":stream") ? "stream" : "json"
+		const responseType = method.toLowerCase().includes("stream") ? "stream" : "json"
 		// Use the high-performance agent only for non-stream requests due to a bug in gaxios with stream + agent
 		const agent = responseType === "stream" ? undefined : this.httpAgent
 
 		console.log(
-			`[GeminiPool] Calling API for ${account.filePath}: URL=${url}, ResponseType=${responseType}, Agent=${
+			`[GeminiPool] Calling API for ${account.filePath}: URL=${url}, Method=${method}, ResponseType=${responseType}, Agent=${
 				agent ? "hpagent" : "default"
 			}`,
 		)
 
 		try {
-			// The project ID is part of the URL, so it should not be in the body.
 			const res = await account.authClient.request({
 				url,
 				method: "POST",
@@ -450,17 +441,21 @@ export class GeminiAccountPool {
 					"Content-Type": "application/json",
 				},
 				responseType,
-				data: JSON.stringify(body), // Send the original body
+				data: JSON.stringify(body), // The body now contains the model and project info
 				signal: signal,
-				agent, // Use the dynamically selected agent
+				agent,
 			})
 			return res.data
 		} catch (error: any) {
-			console.error(`[GeminiPool] Error calling ${url} for account ${account.filePath}:`, error)
+			// Preserve the detailed error logging
+			const errorDetails = error.response?.data ? JSON.stringify(error.response.data) : error.message
+			console.error(`[GeminiPool] Error calling ${url} for account ${account.filePath}: ${errorDetails}`, error)
+
 			if (error.response?.status === 401 && retryAuth) {
 				console.log(`[GeminiPool] Received 401, attempting token refresh for ${account.filePath}`)
 				await this.ensureAuthenticated(account)
-				return this.callEndpoint(account, urlOrMethod, body, false)
+				// Retry with the same method, not the original urlOrMethod
+				return this.callEndpoint(account, method, body, false, signal)
 			}
 			throw error
 		}

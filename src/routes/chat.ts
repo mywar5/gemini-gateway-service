@@ -38,14 +38,19 @@ export function registerChatRoutes(server: FastifyInstance) {
 				})
 
 				const stream = await server.accountPool.executeRequest(async (callApi, projectId) => {
+					// The model ID is now part of the request body, not the URL.
 					const modelId = body.model.includes("/") ? body.model.split("/").pop() : body.model
-					const url = `projects/${projectId}/models/${modelId}:streamGenerateContent`
-					const responseStream = await callApi(
-						url,
-						{
+					const requestBody = {
+						model: modelId,
+						project: projectId,
+						request: {
 							contents: geminiMessages,
 						},
-						abortController.signal, // Pass the signal from our controller
+					}
+					const responseStream = await callApi(
+						"streamGenerateContent", // Pass the method name directly
+						requestBody,
+						abortController.signal,
 					)
 					return responseStream as Readable
 				})
