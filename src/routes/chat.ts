@@ -56,36 +56,52 @@ export function registerChatRoutes(server: FastifyInstance) {
 				})
 
 				let buffer = ""
+				let lastSentIndex = -1 // Keep track of the last processed object in the array
+
 				for await (const chunk of stream) {
 					buffer += chunk.toString()
-					const lines = buffer.split("\n")
-					buffer = lines.pop() || "" // Keep the last, possibly incomplete, line in the buffer
 
-					for (const line of lines) {
-						if (line.trim() === "") continue // Skip empty lines
-						try {
-							const geminiChunk = JSON.parse(line)
+					// The API returns a single JSON array that gets chunked.
+					// We need to buffer until we can parse a valid array structure.
+					try {
+						// Attempt to parse the entire buffer as a JSON array
+						const geminiChunks = JSON.parse(buffer)
+
+						if (Array.isArray(geminiChunks)) {
+							// Process only new chunks that haven't been sent yet
+							for (let i = lastSentIndex + 1; i < geminiChunks.length; i++) {
+								const geminiChunk = geminiChunks[i]
+								const openAIChunk = convertToOpenAIStreamChunk(geminiChunk, body.model)
+								if (openAIChunk && !reply.raw.writableEnded) {
+									reply.raw.write(openAIChunk)
+								}
+								lastSentIndex = i // Update the index of the last sent chunk
+							}
+						}
+					} catch (e) {
+						// This is expected if the JSON is not yet complete.
+						// We simply continue to buffer more data.
+						// To avoid spamming logs, we can add a more sophisticated check later if needed.
+						server.log.trace("Buffer does not contain a complete JSON array yet. Buffering more data.")
+					}
+				}
+
+				// After the stream ends, there might be remaining, valid JSON in the buffer
+				// that was complete but didn't trigger the try-catch block one last time.
+				// This is a fallback to ensure the last piece of data is processed.
+				try {
+					const geminiChunks = JSON.parse(buffer)
+					if (Array.isArray(geminiChunks)) {
+						for (let i = lastSentIndex + 1; i < geminiChunks.length; i++) {
+							const geminiChunk = geminiChunks[i]
 							const openAIChunk = convertToOpenAIStreamChunk(geminiChunk, body.model)
 							if (openAIChunk && !reply.raw.writableEnded) {
 								reply.raw.write(openAIChunk)
 							}
-						} catch (e: any) {
-							server.log.warn(`Could not parse stream line as JSON: "${line}"`, e)
 						}
 					}
-				}
-
-				// Process any remaining data in the buffer
-				if (buffer.trim() !== "" && !reply.raw.writableEnded) {
-					try {
-						const geminiChunk = JSON.parse(buffer)
-						const openAIChunk = convertToOpenAIStreamChunk(geminiChunk, body.model)
-						if (openAIChunk) {
-							reply.raw.write(openAIChunk)
-						}
-					} catch (e: any) {
-						server.log.warn(`Could not parse final buffer content as JSON: "${buffer}"`, e)
-					}
+				} catch (e: any) {
+					server.log.error(`Failed to parse the final JSON buffer. Content: "${buffer}"`, e)
 				}
 
 				reply.raw.write(createStreamEndChunk())
