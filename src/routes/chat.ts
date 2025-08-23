@@ -51,6 +51,7 @@ export function registerChatRoutes(server: FastifyInstance) {
 				server.log.info("Successfully obtained stream from Gemini API. Starting to process chunks...")
 				let buffer = ""
 				let chunkCounter = 0
+				let lastSentText = "" // State to track the last sent text
 
 				for await (const chunk of stream) {
 					chunkCounter++
@@ -75,13 +76,15 @@ export function registerChatRoutes(server: FastifyInstance) {
 								const objectStr = buffer.substring(objectStartIndex, i + 1)
 								try {
 									const geminiChunk = JSON.parse(objectStr)
-									const openAIChunk = convertToOpenAIStreamChunk(geminiChunk, body.model)
-									if (openAIChunk && !reply.raw.writableEnded) {
+									const result = convertToOpenAIStreamChunk(geminiChunk, body.model, lastSentText)
+
+									if (result && result.sseChunk && !reply.raw.writableEnded) {
 										server.log.info(
-											{ object: objectStr },
-											"Parsed and writing a complete JSON object.",
+											{ object: objectStr, delta: result.sseChunk },
+											"Parsed and writing a delta chunk.",
 										)
-										reply.raw.write(openAIChunk)
+										reply.raw.write(result.sseChunk)
+										lastSentText = result.fullText // Update the state
 									}
 									// Reset buffer to the part after the parsed object
 									buffer = buffer.substring(i + 1)

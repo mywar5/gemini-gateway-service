@@ -63,15 +63,28 @@ export function convertToGeminiMessages(messages: OpenAIChatMessage[]): GeminiCo
  * Transforms a Gemini stream chunk into an OpenAI-compatible SSE chunk.
  * @param geminiChunk The chunk from the Gemini API stream.
  * @param model The model name to include in the response.
- * @returns A string formatted as an OpenAI-style Server-Sent Event.
+ * @param lastSentText The text content that was sent in the previous chunk.
+ * @returns A string formatted as an OpenAI-style Server-Sent Event, and the full text of the current chunk.
  */
-export function convertToOpenAIStreamChunk(geminiChunk: any, model: string): string {
+export function convertToOpenAIStreamChunk(
+	geminiChunk: any,
+	model: string,
+	lastSentText: string,
+): { sseChunk: string; fullText: string } | null {
 	const timestamp = Math.floor(Date.now() / 1000)
-	const id = `chatcmpl-${Buffer.from(timestamp.toString()).toString("base64")}`
+	const id = `chatcmpl-${Buffer.from(Math.random().toString()).toString("base64").substring(0, 29)}`
 
-	// This is a simplified transformation. A real implementation would need to handle
-	// different chunk types, content filtering, etc.
-	const content = geminiChunk.candidates?.[0]?.content?.parts?.[0]?.text || ""
+	const fullText = geminiChunk.candidates?.[0]?.content?.parts?.[0]?.text || ""
+
+	if (fullText === lastSentText) {
+		return null // No new content to send
+	}
+
+	const deltaContent = fullText.startsWith(lastSentText) ? fullText.substring(lastSentText.length) : fullText
+
+	if (!deltaContent) {
+		return { sseChunk: "", fullText } // No new content to send, but update the last sent text
+	}
 
 	const streamChunk = {
 		id,
@@ -82,14 +95,17 @@ export function convertToOpenAIStreamChunk(geminiChunk: any, model: string): str
 			{
 				index: 0,
 				delta: {
-					content: content,
+					content: deltaContent,
 				},
 				finish_reason: null,
 			},
 		],
 	}
 
-	return `data: ${JSON.stringify(streamChunk)}\n\n`
+	return {
+		sseChunk: `data: ${JSON.stringify(streamChunk)}\n\n`,
+		fullText,
+	}
 }
 
 /**
