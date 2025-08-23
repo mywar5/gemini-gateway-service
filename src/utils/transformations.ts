@@ -90,7 +90,50 @@ export function convertToOpenAIStreamChunk(
 	const timestamp = Math.floor(Date.now() / 1000)
 	const id = `chatcmpl-${Buffer.from(Math.random().toString()).toString("base64").substring(0, 29)}`
 
-	const fullText = geminiChunk.candidates?.[0]?.content?.parts?.[0]?.text || ""
+	const candidate = geminiChunk.candidates?.[0]
+	if (!candidate) {
+		return null
+	}
+
+	// Check for tool calls first
+	const toolCallPart = candidate.content?.parts?.find((p: any) => p.functionCall)
+	if (toolCallPart) {
+		const functionCall = toolCallPart.functionCall
+		const toolChunk = {
+			id,
+			object: "chat.completion.chunk",
+			created: timestamp,
+			model,
+			choices: [
+				{
+					index: 0,
+					delta: {
+						role: "assistant",
+						content: null,
+						tool_calls: [
+							{
+								index: 0,
+								id: `call_${Buffer.from(Math.random().toString()).toString("base64").substring(0, 24)}`,
+								type: "function",
+								function: {
+									name: functionCall.name,
+									arguments: JSON.stringify(functionCall.args),
+								},
+							},
+						],
+					},
+					finish_reason: "tool_calls",
+				},
+			],
+		}
+		return {
+			sseChunk: `data: ${JSON.stringify(toolChunk)}\n\n`,
+			fullText: lastSentText, // No change in text content
+		}
+	}
+
+	// Fallback to text content if no tool call
+	const fullText = candidate.content?.parts?.[0]?.text || ""
 
 	if (fullText === lastSentText) {
 		return null // No new content to send
@@ -99,7 +142,7 @@ export function convertToOpenAIStreamChunk(
 	const deltaContent = fullText.startsWith(lastSentText) ? fullText.substring(lastSentText.length) : fullText
 
 	if (!deltaContent) {
-		return { sseChunk: "", fullText } // No new content to send, but update the last sent text
+		return { sseChunk: "", fullText } // No new content, but update last sent text
 	}
 
 	const streamChunk = {
@@ -113,7 +156,7 @@ export function convertToOpenAIStreamChunk(
 				delta: {
 					content: deltaContent,
 				},
-				finish_reason: null,
+				finish_reason: candidate.finishReason === "STOP" ? "stop" : null,
 			},
 		],
 	}

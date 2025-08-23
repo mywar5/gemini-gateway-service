@@ -135,7 +135,7 @@
 
 您的 Gemini 网关现在已上线！
 
-- **API 端点**: `http://<YOUR_PUBLIC_IP>:3001/v1/chat/completions`
+- **API 端点**: `http://<YOUR_PUBLIC_IP>:3001/v1/chat/completions`(在前端一般情况下填写`http://<YOUR_PUBLIC_IP>:3001/v1`)
 - **API 密钥**: 不需要。您可以使用任何字符串。
 
 **`curl` 示例:**
@@ -145,7 +145,7 @@ curl http://YOUR_PUBLIC_IP:3001/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer sk-anything" \
   -d '{
-    "model": "gemini-1.0-pro",
+    "model": "gemini-2.5-pro",
     "messages": [
       {
         "role": "user",

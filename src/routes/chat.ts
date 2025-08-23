@@ -24,7 +24,6 @@ export function registerChatRoutes(server: FastifyInstance) {
 		}
 
 		if (body.stream) {
-			// Set headers for Server-Sent Events (SSE)
 			reply.raw.writeHead(200, {
 				"Content-Type": "text/event-stream",
 				Connection: "keep-alive",
@@ -32,12 +31,10 @@ export function registerChatRoutes(server: FastifyInstance) {
 			})
 
 			try {
-				// Send the initial assistant role chunk to establish the stream
 				const initialChunk = createInitialAssistantChunk(body.model)
 				reply.raw.write(initialChunk)
 
 				const geminiMessages = convertToGeminiMessages(body.messages)
-
 				const abortController = new AbortController()
 				request.raw.on("close", () => {
 					if (request.raw.aborted) {
@@ -60,6 +57,7 @@ export function registerChatRoutes(server: FastifyInstance) {
 
 				server.log.info("Successfully obtained stream from Gemini API. Starting to process chunks...")
 
+				const decoder = new TextDecoder("utf-8")
 				let buffer = ""
 				let lastSentText = ""
 				let chunkCounter = 0
@@ -67,15 +65,13 @@ export function registerChatRoutes(server: FastifyInstance) {
 				let inJsonArray = false
 
 				const processBuffer = () => {
-					// This function processes the buffer to find and parse complete JSON objects from the stream.
 					while (true) {
 						if (!inJsonArray) {
 							const arrayStartIndex = buffer.indexOf("[")
 							if (arrayStartIndex !== -1) {
-								buffer = buffer.substring(arrayStartIndex + 1)
+								buffer = buffer.substring(arrayStartIndex)
 								inJsonArray = true
 							} else {
-								// If no array start is found and buffer is not empty, it's likely malformed data.
 								if (buffer.length > 0) buffer = ""
 								break
 							}
@@ -83,51 +79,63 @@ export function registerChatRoutes(server: FastifyInstance) {
 
 						const objectStartIndex = buffer.indexOf("{")
 						if (objectStartIndex === -1) {
-							break // No start of a new object, wait for more data.
+							if (buffer.includes("]")) {
+								inJsonArray = false
+								buffer = ""
+							}
+							break
 						}
 
-						// Scan for the matching closing brace.
 						let i = objectStartIndex
 						braceLevel = 0
 						let foundObject = false
 						for (; i < buffer.length; i++) {
-							if (buffer[i] === "{") {
-								braceLevel++
-							} else if (buffer[i] === "}") {
+							if (buffer[i] === "{") braceLevel++
+							else if (buffer[i] === "}") {
 								braceLevel--
 								if (braceLevel === 0) {
 									const objectStr = buffer.substring(objectStartIndex, i + 1)
 									try {
 										const geminiChunk = JSON.parse(objectStr)
-										// Ensure we pass the inner 'response' object if it exists.
 										const contentChunk = geminiChunk.response || geminiChunk
-										const result = convertToOpenAIStreamChunk(contentChunk, body.model, lastSentText)
+										const result = convertToOpenAIStreamChunk(
+											contentChunk,
+											body.model,
+											lastSentText,
+										)
 
 										if (result && result.sseChunk && !reply.raw.writableEnded) {
 											reply.raw.write(result.sseChunk)
 											lastSentText = result.fullText
 										}
 									} catch (e) {
-										server.log.warn({ object: objectStr, error: e }, "Failed to parse a JSON object from stream.")
+										server.log.warn(
+											{ object: objectStr, error: e },
+											"Failed to parse JSON object from stream.",
+										)
 									}
 									buffer = buffer.substring(i + 1)
 									foundObject = true
-									break // Restart the while loop to process the rest of the buffer.
+									break
 								}
 							}
 						}
 
-						if (!foundObject) {
-							break // Incomplete object in buffer, wait for more data.
-						}
+						if (!foundObject) break
 					}
 				}
 
 				for await (const chunk of stream) {
 					chunkCounter++
-					const rawChunk = chunk.toString()
+					const rawChunk = decoder.decode(chunk, { stream: true })
 					server.log.info({ chunk: rawChunk, chunkNumber: chunkCounter }, "Received a raw chunk from stream.")
 					buffer += rawChunk
+					processBuffer()
+				}
+
+				const finalChunk = decoder.decode()
+				if (finalChunk) {
+					buffer += finalChunk
 					processBuffer()
 				}
 

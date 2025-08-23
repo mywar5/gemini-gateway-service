@@ -108,14 +108,51 @@ describe("Transformation Utilities", () => {
 			expect(result).toBeNull()
 		})
 
-		it("should handle empty or malformed Gemini chunks gracefully", () => {
+		it("should handle empty or malformed Gemini chunks gracefully by returning null", () => {
 			const geminiChunk = {}
 			const model = "gemini-1.0-pro"
 			const result = convertToOpenAIStreamChunk(geminiChunk, model, "some text")
+			expect(result).toBeNull()
+		})
+
+		it("should correctly convert a tool call chunk", () => {
+			const geminiChunk = {
+				candidates: [
+					{
+						content: {
+							parts: [
+								{
+									functionCall: {
+										name: "execute_command",
+										args: { command: "ls -l" },
+									},
+								},
+							],
+						},
+					},
+				],
+			}
+			const model = "gemini-pro"
+			const result = convertToOpenAIStreamChunk(geminiChunk, model, "")
 			expect(result).not.toBeNull()
-			// It should return an empty delta because the new text is empty, and it's different from lastSentText
-			expect(result?.sseChunk).toBe("")
-			expect(result?.fullText).toBe("")
+			const parsed = JSON.parse(result!.sseChunk.replace("data: ", ""))
+			const toolCall = parsed.choices[0].delta.tool_calls[0]
+
+			expect(parsed.choices[0].finish_reason).toBe("tool_calls")
+			expect(toolCall.type).toBe("function")
+			expect(toolCall.function.name).toBe("execute_command")
+			expect(toolCall.function.arguments).toBe(JSON.stringify({ command: "ls -l" }))
+		})
+
+		it("should set finish_reason to 'stop' when Gemini indicates it", () => {
+			const geminiChunk = {
+				candidates: [{ content: { parts: [{ text: "Final answer." }] }, finishReason: "STOP" }],
+			}
+			const model = "gemini-pro"
+			const result = convertToOpenAIStreamChunk(geminiChunk, model, "")
+			expect(result).not.toBeNull()
+			const parsed = JSON.parse(result!.sseChunk.replace("data: ", ""))
+			expect(parsed.choices[0].finish_reason).toBe("stop")
 		})
 	})
 
