@@ -77,6 +77,7 @@ export function convertToGeminiMessages(messages: OpenAIChatMessage[]): GeminiCo
 
 /**
  * Transforms a Gemini stream chunk into an OpenAI-compatible SSE chunk.
+ * This version accumulates text and handles tool calls gracefully.
  * @param geminiChunk The chunk from the Gemini API stream.
  * @param model The model name to include in the response.
  * @param lastSentText The text content that was sent in the previous chunk.
@@ -95,54 +96,22 @@ export function convertToOpenAIStreamChunk(
 		return null
 	}
 
-	// Check for tool calls first
-	const toolCallPart = candidate.content?.parts?.find((p: any) => p.functionCall)
-	if (toolCallPart) {
-		const functionCall = toolCallPart.functionCall
-		const toolChunk = {
-			id,
-			object: "chat.completion.chunk",
-			created: timestamp,
-			model,
-			choices: [
-				{
-					index: 0,
-					delta: {
-						role: "assistant",
-						content: null,
-						tool_calls: [
-							{
-								index: 0,
-								id: `call_${Buffer.from(Math.random().toString()).toString("base64").substring(0, 24)}`,
-								type: "function",
-								function: {
-									name: functionCall.name,
-									arguments: JSON.stringify(functionCall.args),
-								},
-							},
-						],
-					},
-					finish_reason: "tool_calls",
-				},
-			],
-		}
-		return {
-			sseChunk: `data: ${JSON.stringify(toolChunk)}\n\n`,
-			fullText: lastSentText, // No change in text content
-		}
+	// The full text from this chunk is the accumulation of all parts.
+	const fullText = candidate.content?.parts?.map((p: any) => p.text || "").join("") || ""
+
+	// No new text content was received in this chunk.
+	if (fullText.length === 0) {
+		return null
 	}
 
-	// Fallback to text content if no tool call
-	const fullText = candidate.content?.parts?.[0]?.text || ""
+	const deltaContent = fullText // In the new model, we send the entire new text part as the delta.
 
-	if (fullText === lastSentText) {
-		return null // No new content to send
-	}
-
-	const deltaContent = fullText.startsWith(lastSentText) ? fullText.substring(lastSentText.length) : fullText
-
-	if (!deltaContent) {
-		return { sseChunk: "", fullText } // No new content, but update last sent text
+	const finishReason = candidate.finishReason
+	let finishReasonMapped = null
+	if (finishReason === "STOP") {
+		finishReasonMapped = "stop"
+	} else if (finishReason === "TOOL_CODE" || finishReason === "TOOL_CALLS") {
+		finishReasonMapped = "tool_calls"
 	}
 
 	const streamChunk = {
@@ -156,20 +125,20 @@ export function convertToOpenAIStreamChunk(
 				delta: {
 					content: deltaContent,
 				},
-				finish_reason: candidate.finishReason === "STOP" ? "stop" : null,
+				finish_reason: finishReasonMapped,
 			},
 		],
 	}
 
 	return {
 		sseChunk: `data: ${JSON.stringify(streamChunk)}\n\n`,
-		fullText,
+		fullText: lastSentText + fullText, // The new full text is the old one plus the new one.
 	}
 }
 
 /**
- * Creates the final "done" chunk for an OpenAI stream.
- * @returns A string indicating the end of the stream.
+ * Creates the initial "assistant" role chunk for an OpenAI stream.
+ * @returns A string formatted as an OpenAI-style Server-Sent Event.
  */
 export function createInitialAssistantChunk(model: string): string {
 	const timestamp = Math.floor(Date.now() / 1000)

@@ -7,6 +7,7 @@ import {
 	createStreamEndChunk,
 	OpenAIChatMessage,
 } from "../utils/transformations"
+import { StreamProcessor } from "../utils/stream-processor"
 
 // Define the expected request body structure, aligning with the transformation logic
 interface ChatCompletionRequestBody {
@@ -57,89 +58,28 @@ export function registerChatRoutes(server: FastifyInstance) {
 
 				server.log.info("Successfully obtained stream from Gemini API. Starting to process chunks...")
 
-				const decoder = new TextDecoder("utf-8")
-				let buffer = ""
 				let lastSentText = ""
-				let chunkCounter = 0
-				let braceLevel = 0
-				let inJsonArray = false
 
-				const processBuffer = () => {
-					while (true) {
-						if (!inJsonArray) {
-							const arrayStartIndex = buffer.indexOf("[")
-							if (arrayStartIndex !== -1) {
-								buffer = buffer.substring(arrayStartIndex)
-								inJsonArray = true
-							} else {
-								if (buffer.length > 0) buffer = ""
-								break
-							}
+				const streamProcessor = new StreamProcessor(
+					reply.raw, // This is still the destination stream
+					(geminiChunk: any) => {
+						const result = convertToOpenAIStreamChunk(geminiChunk, body.model, lastSentText)
+						if (result && result.sseChunk && !reply.raw.writableEnded) {
+							reply.raw.write(result.sseChunk)
+							lastSentText = result.fullText
 						}
-
-						const objectStartIndex = buffer.indexOf("{")
-						if (objectStartIndex === -1) {
-							if (buffer.includes("]")) {
-								inJsonArray = false
-								buffer = ""
-							}
-							break
-						}
-
-						let i = objectStartIndex
-						braceLevel = 0
-						let foundObject = false
-						for (; i < buffer.length; i++) {
-							if (buffer[i] === "{") braceLevel++
-							else if (buffer[i] === "}") {
-								braceLevel--
-								if (braceLevel === 0) {
-									const objectStr = buffer.substring(objectStartIndex, i + 1)
-									try {
-										const geminiChunk = JSON.parse(objectStr)
-										const contentChunk = geminiChunk.response || geminiChunk
-										const result = convertToOpenAIStreamChunk(
-											contentChunk,
-											body.model,
-											lastSentText,
-										)
-
-										if (result && result.sseChunk && !reply.raw.writableEnded) {
-											reply.raw.write(result.sseChunk)
-											lastSentText = result.fullText
-										}
-									} catch (e) {
-										server.log.warn(
-											{ object: objectStr, error: e },
-											"Failed to parse JSON object from stream.",
-										)
-									}
-									buffer = buffer.substring(i + 1)
-									foundObject = true
-									break
-								}
-							}
-						}
-
-						if (!foundObject) break
-					}
-				}
+					},
+					(finalChunkCount) => {
+						server.log.info({ finalChunkCount }, "Stream processing finished by StreamProcessor.")
+					},
+				)
 
 				for await (const chunk of stream) {
-					chunkCounter++
-					const rawChunk = decoder.decode(chunk, { stream: true })
-					server.log.info({ chunk: rawChunk, chunkNumber: chunkCounter }, "Received a raw chunk from stream.")
-					buffer += rawChunk
-					processBuffer()
+					streamProcessor.write(chunk)
 				}
+				streamProcessor.end()
 
-				const finalChunk = decoder.decode()
-				if (finalChunk) {
-					buffer += finalChunk
-					processBuffer()
-				}
-
-				server.log.info({ finalChunkCount: chunkCounter }, "Stream processing loop finished.")
+				server.log.info("Stream processing loop finished.")
 				reply.raw.write(createStreamEndChunk())
 			} catch (error: any) {
 				server.log.error(`Stream error: ${error.message}`)
